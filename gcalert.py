@@ -4,7 +4,7 @@
 # This script will periodically check your Google Calendar and display an alarm
 # when that's set for the event. It reads ALL your calendars automatically.
 #
-# Requires: python-notify python-gdata
+# Requires: python-notify python-gdata notification-daemon
 # Also, recommended for SSL: /afs/cern.ch/user/a/ahorvath/public/deb/python-gdata_1.2.4-0ubuntu2ssl_all.deb FIXME
 # Edit below for username/pass
 #
