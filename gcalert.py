@@ -64,7 +64,12 @@ def DateRangeQuery(cs, start_date='2007-01-01', end_date='2007-07-01'):
     el=[] # event occurence list
     for username in GetUserCalendars(cs):
         # FIXME error checking
-        query = gdata.calendar.service.CalendarEventQuery(username, 'private', 'full')
+        try:
+            query = gdata.calendar.service.CalendarEventQuery(username, 'private', 'full')
+        except gdata.service.RequestError:
+            print "** Error connecting to Google, will retry later **"
+            return el
+
         query.start_min = start_date
         query.start_max = end_date 
         feed = cs.CalendarQuery(query)
@@ -133,9 +138,19 @@ def process_events_thread():
         # add something new meanwhile
         time.sleep(alarm_sleeptime)
 
+# ----------------------------
+def do_login(cs):
+    try:
+        cs.ProgrammaticLogin()
+    except gdata.service.Error: # seriously, yes
+        print 'Failed to authenticate to google.'
+        print 'Check username, password and that the account is enabled.'
+        sys.exit(1)
+
 # -------------------------------------------------------------------------------------------
 # the main thread will check the calendar every so often
 #
+
 # login
 cs = CalendarService()
 cs.email = 'probabela98'
@@ -146,14 +161,9 @@ cs.email = 'probabela98'
 cs.ssl = True;
 cs.password = 'pbela123'
 cs.source = 'raas-Calendar_Alerter-0.1'
-try:
-    cs.ProgrammaticLogin()
-except gdata.service.Error: # seriously, yes
-    print 'Failed to authenticate to google.'
-    print 'Check username, password and that the account is enabled.'
-    sys.exit(1)
 
 thread.start_new_thread(process_events_thread,())
+do_login(cs)
 
 while 1:
     print "main thread: running at %s " % time.ctime()
