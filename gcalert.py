@@ -10,17 +10,17 @@
 #
 # FIXME:
 # - gracious handling of missing pynotify 
-# - command-line options
-# - config file for username/password
 # - funky icon for libnotify alert:)
 # - add 'Location' string from feed
-
+# - only use the 'popup' alerts, not the email/sms ones
+# - warn for unsecure permissions of the password/secret file
 
 from gdata.calendar.service import *
 import gdata.service
 import gdata.calendar
 import getopt
 import sys
+import os
 import time
 import urllib
 import pynotify
@@ -29,15 +29,27 @@ import thread
 from dateutil.tz import *
 from dateutil.parser import *
 
-# ----------------------------
+# -------------------------------------------------------------------------------------------
+# default values for parameters
+
+secrets_file=os.path.join(os.environ["HOME"],".gcalert_secret")
 alarm_sleeptime=30 # seconds
-calendar_sleeptime=180 # seconds
-range_days=2 # look this many days in the future
-# ----------------------------
+query_sleeptime=180 # seconds
+lookahead_days=3 # look this many days in the future
+debug_flag=False
+# -------------------------------------------------------------------------------------------
+# end of user-changeable stuff here
+# -------------------------------------------------------------------------------------------
 
 events=[] # all events seen so far that are yet to start
 events_lock=thread.allocate_lock() # hold to access events[]
 alarmed_events=[] # events (occurences etc) already done, minus those in the past
+
+# print debug messages if -d was given
+# ----------------------------
+def debug(s):
+    if (debug_flag):
+        print s
 
 # ----------------------------
 # get the list of 'magic strings' used to identify each calendar
@@ -94,6 +106,14 @@ def do_alarm(event):
     if not a.show():
         print "Failed to send notification!"
 
+# ----------------------------
+def do_login(cs):
+    try:
+        cs.ProgrammaticLogin()
+    except gdata.service.Error: # seriously, yes
+        print 'Failed to authenticate to google.'
+        print 'Check username, password and that the account is enabled.'
+        sys.exit(1)
 
 # -------------------------------------------------------------------------------------------
 # alarming on events is run as a background op
@@ -106,12 +126,12 @@ def process_events_thread():
     while 1:
         nowunixtime=time.time()
         # throw away old events
-        print "p_e_t: running at %s" % time.ctime()
+        debug("p_e_t: running at %s" % time.ctime())
         events_lock.acquire()
         for e in events:
             e_start_unixtime=int(e['start'].astimezone(tzlocal()).strftime('%s'))
             if e_start_unixtime<nowunixtime:
-                print "p_e_t: removing %s, is gone" % e
+                debug("p_e_t: removing %s, is gone" % e)
                 events.remove(e)
                 # also free up some memory
                 if e in alarmed_events:
@@ -127,59 +147,116 @@ def process_events_thread():
                     do_alarm(e)
                     alarmed_events.append(e)
                 else:
-                    print "p_e_t: not yet: \"%s\" (%s) [n:%d, a:%d]" % ( e['title'],e['start'],nowunixtime,alarm_at_unixtime )
+                    debug("p_e_t: not yet: \"%s\" (%s) [n:%d, a:%d]" % ( e['title'],e['start'],nowunixtime,alarm_at_unixtime ))
         events_lock.release()
-        print "p_e_t: finished at %s" % time.ctime()
+        debug("p_e_t: finished at %s" % time.ctime())
         # we can't just sleep until the next event as the other thread MIGHT
         # add something new meanwhile
         time.sleep(alarm_sleeptime)
 
 # ----------------------------
-def do_login(cs):
-    try:
-        cs.ProgrammaticLogin()
-    except gdata.service.Error: # seriously, yes
-        print 'Failed to authenticate to google.'
-        print 'Check username, password and that the account is enabled.'
-        sys.exit(1)
+def usage():
+    print "Poll Google Calendar and display alarms on events that have alarms defined."
+    print "Andras.Horvath@gmail.com, 2009\n"
+    print "Usage: gcalert.py -s <secretsfile> [-d] [-c <seconds>] [-a <seconds>] [-l <days>]"
+    print " -s F, --secret=F : specify location of a file containing"
+    print "                    username and password, newline-separated"
+    print "                    Default: $HOME/.gcalert_secret"
+    print " -d, --debug      : produce debug messages"
+    print " -q N, --query=N  : poll Google every N seconds for newly added events"
+    print "                    (default: 180)"
+    print " -a M, --alarm=M  : awake and produce alarms this often (default: 30)"
+    print " -l L, --look=L   : \"look ahead\" L days in the calendar for events"
+    print "                    (default: 3)"
+
 
 # -------------------------------------------------------------------------------------------
-# the main thread will check the calendar every so often
+# the main thread will start up, then launch the background 'alarmer' thread,
+# and proceed check the calendar every so often
 #
 
-# login
+try:
+    opts, args = getopt.getopt(sys.argv[1:], "hds:q:a:l:", ["help", "debug", "secret=", "query=", "alarm=", "look="])
+except getopt.GetoptError, err:
+    # print help information and exit:
+    print str(err) # will print something like "option -a not recognized"
+    sys.exit(2)
+output = None
+verbose = False
+try:
+    for o, a in opts:
+        if o == "-d":
+            debug_flag = True
+        elif o in ("-h", "--help"):
+            usage()
+            sys.exit()
+        elif o in ("-s", "--secret"):
+            secrets_file=a
+            debug("secrets_file set to %s" % secrets_file)
+        elif o in ("-q", "--query"):
+            query_sleeptime=int(a) # FIXME handle non-integers graciously
+            debug("query_sleeptime set to %d" % query_sleeptime)
+        elif o in ("-a", "--alarm"):
+            alarm_sleeptime=int(a)
+            debug("alarm_sleeptime set to %d" % alarm_sleeptime)
+        elif o in ("-l", "--look"):
+            lookahead_days=int(a)
+            debug("lookahead_days set to %d" % lookahead_days)
+        else:
+            assert False, "unhandled option"
+except ValueError:
+    print "Option %s requires an integer parameter; use '-h' for help." % o
+    sys.exit(1)
+
+# get credentials from file
 cs = CalendarService()
-cs.email = 'probabela98'
-# this needs the SSL patch to python-gdata
+try:
+    # the 'password file' should contain two lines with username and password
+    # the :2 is there to allow a newline at the end
+    (cs.email, cs.password) = open(secrets_file).read().split('\n')[:2]
+except IOError as error:
+    print error 
+    sys.exit(1)
+except ValueError:
+    print "Password file %s should contain two newline-separated lines: username (without gmail.com) and password." % secrets_file
+    sys.exit(2)
+except Exception as error:
+    print "Something unhandled went wrong reading your password file '%s', please report this as a bug." % secrets_file
+    print error
+    sys.exit(3)
+
+# Full-fledged SSL needs the SSL patch (to python-gdata_1.2.4-0ubuntu2 at least)
+# see http://groups.google.com/group/gdata-python-client-library-contributors/browse_thread/thread/48254170a6f6818a?pli=1
+#
 # if not present, the login will go over SSL
 # but the actual calendar will be retrieved over plain HTTP
+#
 # tcpdump if unsure ;)
 cs.ssl = True;
-cs.password = 'pbela123'
-cs.source = 'raas-Calendar_Alerter-0.1'
+cs.source = 'gcalert-Calendar_Alerter-0.1'
 
 thread.start_new_thread(process_events_thread,())
 do_login(cs)
 
 while 1:
-    print "main thread: running at %s " % time.ctime()
+    debug("main thread: running at %s " % time.ctime())
     # today
     range_start=time.strftime("%Y-%m-%d",time.localtime())
     # tommorrow, or later
-    range_end=time.strftime("%Y-%m-%d",time.localtime(time.time()+range_days*24*3600))
+    range_end=time.strftime("%Y-%m-%d",time.localtime(time.time()+lookahead_days*24*3600))
     newevents=DateRangeQuery(cs, range_start, range_end)
     events_lock.acquire()
     now=time.time()
     # add new events to the list
     for n in newevents:
         if not n in events:
-            print 'Received event: %s' % n
+            debug('Received event: %s' % n)
             # does it start in the future?
             if now<int(n['start'].astimezone(tzlocal()).strftime('%s')):
-                print "-> future, adding"
+                debug("-> future, adding")
                 events.append(n)
             else:
-                print "-> past already"
+                debug("-> past already")
     events_lock.release()
-    print "main thread: finished at %s, sleeping %d secs " % ( time.ctime(), calendar_sleeptime )
-    time.sleep(calendar_sleeptime)
+    debug("main thread: finished at %s, sleeping %d secs " % ( time.ctime(), query_sleeptime ))
+    time.sleep(query_sleeptime)
