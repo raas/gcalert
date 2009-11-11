@@ -15,10 +15,6 @@
 # - funky icon for libnotify alert:)
 # - add 'Location' string from feed
 
-try:
-    from xml.etree import ElementTree # for Python 2.5 users
-except ImportError:
-    from elementtree import ElementTree
 
 from gdata.calendar.service import *
 import gdata.service
@@ -92,7 +88,7 @@ def do_alarm(event):
     starttime=event['start'].astimezone(tzlocal()).strftime('%Y-%m-%d %H:%M:%S')
     print " ***** ALARM ALARM ALARM %s %s ****  " % ( event['title'],starttime ) 
     # FIXME add an icon here
-    a=pynotify.Notification( event['title'], "Starting: %s local time" % starttime )
+    a=pynotify.Notification( event['title'], "Starting: %s" % starttime )
     # let the alarm stay until it's closed by hand (acknowledged)
     a.set_timeout(0)
     if not a.show():
@@ -107,8 +103,8 @@ def process_events_thread():
     if not pynotify.init("Basics"):
         sys.exit(1)
     time.sleep(3) # offset :)
-    nowunixtime=time.time()
     while 1:
+        nowunixtime=time.time()
         # throw away old events
         print "p_e_t: running at %s" % time.ctime()
         events_lock.acquire()
@@ -131,7 +127,7 @@ def process_events_thread():
                     do_alarm(e)
                     alarmed_events.append(e)
                 else:
-                    print "p_e_t: no alarm yet for %s" % e
+                    print "p_e_t: not yet: \"%s\" (%s) [n:%d, a:%d]" % ( e['title'],e['start'],nowunixtime,alarm_at_unixtime )
         events_lock.release()
         print "p_e_t: finished at %s" % time.ctime()
         # we can't just sleep until the next event as the other thread MIGHT
