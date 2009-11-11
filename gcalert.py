@@ -44,6 +44,7 @@ debug_flag=False
 events=[] # all events seen so far that are yet to start
 events_lock=thread.allocate_lock() # hold to access events[]
 alarmed_events=[] # events (occurences etc) already done, minus those in the past
+connected=False # google connection is disconnected
 
 # print debug messages if -d was given
 # ----------------------------
@@ -68,30 +69,31 @@ def GetUserCalendars(cs):
 # each event record has fields 'title', 'start', 'end', 'minutes' 
 # each reminder occurence creates a new event
 #
+# returns (connectionstatus, eventlist)
 def DateRangeQuery(cs, start_date='2007-01-01', end_date='2007-07-01'):
     el=[] # event occurence list
-    for username in GetUserCalendars(cs):
-        # FIXME error checking
-        try:
+    try:
+        for username in GetUserCalendars(cs):
             query = gdata.calendar.service.CalendarEventQuery(username, 'private', 'full')
-        except gdata.service.RequestError:
-            print "** Error connecting to Google, will retry later **"
-            return el
 
-        query.start_min = start_date
-        query.start_max = end_date 
-        feed = cs.CalendarQuery(query)
-        for an_event in feed.entry:
-            for a_when in an_event.when:
-                for a_rem in a_when.reminder:
-                    # it's a separate 'event' for each reminder
-                    # start/end times are datetime.datetime() objects here
-                    # created by dateutil.parser.parse()
-                    el.append({'title':an_event.title.text, 
-                               'start':parse(a_when.start_time),
-                               'end':parse(a_when.end_time),
-                               'minutes':a_rem.minutes})
-    return el
+            query.start_min = start_date
+            query.start_max = end_date 
+            feed = cs.CalendarQuery(query)
+            for an_event in feed.entry:
+                for a_when in an_event.when:
+                    for a_rem in a_when.reminder:
+                        # it's a separate 'event' for each reminder
+                        # start/end times are datetime.datetime() objects here
+                        # created by dateutil.parser.parse()
+                        el.append({'title':an_event.title.text, 
+                                   'start':parse(a_when.start_time),
+                                   'end':parse(a_when.end_time),
+                                   'minutes':a_rem.minutes})
+    except Exception as error: # FIXME clearer
+        print "** Error connecting to Google: %s" % error
+        return (False,el) # el is empty here
+
+    return (True,el)
 
 # ----------------------------
 
@@ -110,10 +112,13 @@ def do_alarm(event):
 def do_login(cs):
     try:
         cs.ProgrammaticLogin()
-    except gdata.service.Error: # seriously, yes
-        print 'Failed to authenticate to google.'
+    #except gdata.service.Error: # seriously, yes, "Error"
+    except Exception as error:
+        print 'Failed to authenticate to Google: %s' % error
         print 'Check username, password and that the account is enabled.'
-        sys.exit(1)
+        return False
+    print "** Logged in to Google Calendar **"
+    return True
 
 # -------------------------------------------------------------------------------------------
 # alarming on events is run as a background op
@@ -236,27 +241,31 @@ cs.ssl = True;
 cs.source = 'gcalert-Calendar_Alerter-0.1'
 
 thread.start_new_thread(process_events_thread,())
-do_login(cs)
+connectionstatus=do_login(cs)
 
 while 1:
-    debug("main thread: running at %s " % time.ctime())
-    # today
-    range_start=time.strftime("%Y-%m-%d",time.localtime())
-    # tommorrow, or later
-    range_end=time.strftime("%Y-%m-%d",time.localtime(time.time()+lookahead_days*24*3600))
-    newevents=DateRangeQuery(cs, range_start, range_end)
-    events_lock.acquire()
-    now=time.time()
-    # add new events to the list
-    for n in newevents:
-        if not n in events:
-            debug('Received event: %s' % n)
-            # does it start in the future?
-            if now<int(n['start'].astimezone(tzlocal()).strftime('%s')):
-                debug("-> future, adding")
-                events.append(n)
-            else:
-                debug("-> past already")
-    events_lock.release()
-    debug("main thread: finished at %s, sleeping %d secs " % ( time.ctime(), query_sleeptime ))
-    time.sleep(query_sleeptime)
+    if(not connectionstatus):
+        connectionstatus=do_login(cs)
+        time.sleep(login_retry_sleeptime)
+    else:
+        debug("main thread: running at %s " % time.ctime())
+        # today
+        range_start=time.strftime("%Y-%m-%d",time.localtime())
+        # tommorrow, or later
+        range_end=time.strftime("%Y-%m-%d",time.localtime(time.time()+lookahead_days*24*3600))
+        (connectionstatus,newevents)=DateRangeQuery(cs, range_start, range_end)
+        events_lock.acquire()
+        now=time.time()
+        # add new events to the list
+        for n in newevents:
+            if not n in events:
+                debug('Received event: %s' % n)
+                # does it start in the future?
+                if now<int(n['start'].astimezone(tzlocal()).strftime('%s')):
+                    debug("-> future, adding")
+                    events.append(n)
+                else:
+                    debug("-> past already")
+        events_lock.release()
+        debug("main thread: finished at %s, sleeping %d secs " % ( time.ctime(), query_sleeptime ))
+        time.sleep(query_sleeptime)
