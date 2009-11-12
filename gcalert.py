@@ -15,8 +15,8 @@
 # - only use the 'popup' alerts, not the email/sms ones
 # - warn for unsecure permissions of the password/secret file
 # - properly exit at first ^C or some other mechanism
-# - turn debugging on/off by signal?
 # - option for strftime in alarms
+# - use some sort of proper logging with log levels etc
 
 from gdata.calendar.service import *
 import gdata.service
@@ -56,6 +56,9 @@ def debug(s):
     if (debug_flag):
         print s
 
+def message(s):
+    print "%s -- %s" % ( time.asctime(), s)
+
 # ----------------------------
 # get the list of 'magic strings' used to identify each calendar
 # returns: list(username) that each can be used in CalendarEventQuery()
@@ -94,7 +97,7 @@ def DateRangeQuery(cs, start_date='2007-01-01', end_date='2007-07-01'):
                                    'end':parse(a_when.end_time),
                                    'minutes':a_rem.minutes})
     except Exception as error: # FIXME clearer
-        print "** Error connecting to Google: %s" % error
+        message( "Error connecting to Google: %s" % error )
         return (False,el) # el is empty here
 
     return (True,el)
@@ -104,13 +107,13 @@ def DateRangeQuery(cs, start_date='2007-01-01', end_date='2007-07-01'):
 # alarm one event
 def do_alarm(event):
     starttime=event['start'].astimezone(tzlocal()).strftime('%Y-%m-%d  %H:%M')
-    print " ***** ALARM ALARM ALARM %s %s ****  " % ( event['title'],starttime ) 
+    message( " ***** ALARM ALARM ALARM %s %s ****  " % ( event['title'],starttime )  )
     # FIXME add an icon here
     a=pynotify.Notification( event['title'], "Starting: %s" % starttime )
     # let the alarm stay until it's closed by hand (acknowledged)
     a.set_timeout(0)
     if not a.show():
-        print "Failed to send notification!"
+        message( "Failed to send alarm notification!" )
 
 # ----------------------------
 def do_login(cs):
@@ -118,10 +121,10 @@ def do_login(cs):
         cs.ProgrammaticLogin()
     #except gdata.service.Error: # seriously, yes, "Error"
     except Exception as error:
-        print 'Failed to authenticate to Google: %s' % error
-        print 'Check username, password and that the account is enabled.'
+        message( 'Failed to authenticate to Google: %s' % error )
+        message( 'Check username, password and that the account is enabled.' )
         return False
-    print "** Logged in to Google Calendar **"
+    message( "** Logged in to Google Calendar **")
     return True
 
 # -------------------------------------------------------------------------------------------
