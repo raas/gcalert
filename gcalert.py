@@ -14,6 +14,9 @@
 # - add 'Location' string from feed
 # - only use the 'popup' alerts, not the email/sms ones
 # - warn for unsecure permissions of the password/secret file
+# - properly exit at first ^C or some other mechanism
+# - turn debugging on/off by signal?
+# - option for strftime in alarms
 
 from gdata.calendar.service import *
 import gdata.service
@@ -33,10 +36,11 @@ from dateutil.parser import *
 # default values for parameters
 
 secrets_file=os.path.join(os.environ["HOME"],".gcalert_secret")
-alarm_sleeptime=30 # seconds
-query_sleeptime=180 # seconds
+alarm_sleeptime=30 # seconds between waking up to check alarm list
+query_sleeptime=180 # seconds between querying Google 
 lookahead_days=3 # look this many days in the future
 debug_flag=False
+login_retry_sleeptime=300 # seconds between reconnects in case of errors
 # -------------------------------------------------------------------------------------------
 # end of user-changeable stuff here
 # -------------------------------------------------------------------------------------------
@@ -99,7 +103,7 @@ def DateRangeQuery(cs, start_date='2007-01-01', end_date='2007-07-01'):
 
 # alarm one event
 def do_alarm(event):
-    starttime=event['start'].astimezone(tzlocal()).strftime('%Y-%m-%d %H:%M:%S')
+    starttime=event['start'].astimezone(tzlocal()).strftime('%Y-%m-%d  %H:%M')
     print " ***** ALARM ALARM ALARM %s %s ****  " % ( event['title'],starttime ) 
     # FIXME add an icon here
     a=pynotify.Notification( event['title'], "Starting: %s" % starttime )
@@ -173,7 +177,7 @@ def usage():
     print " -a M, --alarm=M  : awake and produce alarms this often (default: 30)"
     print " -l L, --look=L   : \"look ahead\" L days in the calendar for events"
     print "                    (default: 3)"
-
+    print " -r R, --retry=R  : sleep R seconds between reconnect attempts (default: 300)"
 
 # -------------------------------------------------------------------------------------------
 # the main thread will start up, then launch the background 'alarmer' thread,
@@ -181,7 +185,7 @@ def usage():
 #
 
 try:
-    opts, args = getopt.getopt(sys.argv[1:], "hds:q:a:l:", ["help", "debug", "secret=", "query=", "alarm=", "look="])
+    opts, args = getopt.getopt(sys.argv[1:], "hds:q:a:l:r:", ["help", "debug", "secret=", "query=", "alarm=", "look=", "retry="])
 except getopt.GetoptError, err:
     # print help information and exit:
     print str(err) # will print something like "option -a not recognized"
@@ -207,6 +211,9 @@ try:
         elif o in ("-l", "--look"):
             lookahead_days=int(a)
             debug("lookahead_days set to %d" % lookahead_days)
+        elif o in ("-r", "--retry"):
+            lookahead_days=int(a)
+            debug("login_retry_sleeptime set to %d" % lookahead_days)
         else:
             assert False, "unhandled option"
 except ValueError:
