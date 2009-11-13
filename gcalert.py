@@ -6,7 +6,6 @@
 #
 # Requires: python-notify python-gdata notification-daemon python-dateutil
 # Also, recommended for SSL: /afs/cern.ch/user/a/ahorvath/public/deb/python-gdata_1.2.4-0ubuntu2ssl_all.deb FIXME
-# Edit below for username/pass
 #
 # FIXME:
 # - gracious handling of missing pynotify 
