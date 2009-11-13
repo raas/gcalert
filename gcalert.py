@@ -52,12 +52,12 @@ connected=False # google connection is disconnected
 
 # print debug messages if -d was given
 # ----------------------------
+def message(s):
+    print "%s gcalert.py: %s" % ( time.asctime(), s)
+
 def debug(s):
     if (debug_flag):
-        print s
-
-def message(s):
-    print "%s -- %s" % ( time.asctime(), s)
+        message("DEBUG: %s" % s)
 
 # ----------------------------
 # get the list of 'magic strings' used to identify each calendar
@@ -97,7 +97,8 @@ def DateRangeQuery(cs, start_date='2007-01-01', end_date='2007-07-01'):
                                    'end':parse(a_when.end_time),
                                    'minutes':a_rem.minutes})
     except Exception as error: # FIXME clearer
-        message( "Error connecting to Google: %s" % error )
+        message( "Google connection lost, will re-connect" )
+        debug( "Google connection lost: %s" % error )
         return (False,el) # el is empty here
 
     return (True,el)
@@ -116,16 +117,18 @@ def do_alarm(event):
         message( "Failed to send alarm notification!" )
 
 # ----------------------------
+# try to log in, return logged-in-ness (true for success)
 def do_login(cs):
     try:
         cs.ProgrammaticLogin()
     #except gdata.service.Error: # seriously, yes, "Error"
     except Exception as error:
-        message( 'Failed to authenticate to Google: %s' % error )
+        message( 'Failed to authenticate to Google as %s' % cs.email )
+        debug( 'Failed to authenticate to Google: %s' % error )
         message( 'Check username, password and that the account is enabled.' )
         return False
-    message( "** Logged in to Google Calendar **")
-    return True
+    message( "Logged in to Google Calendar as %s" % cs.email )
+    return True # we're logged in
 
 # -------------------------------------------------------------------------------------------
 # alarming on events is run as a background op
@@ -138,7 +141,7 @@ def process_events_thread():
     while 1:
         nowunixtime=time.time()
         # throw away old events
-        debug("p_e_t: running at %s" % time.ctime())
+        debug("p_e_t: running")
         events_lock.acquire()
         for e in events:
             e_start_unixtime=int(e['start'].astimezone(tzlocal()).strftime('%s'))
@@ -161,7 +164,7 @@ def process_events_thread():
                 else:
                     debug("p_e_t: not yet: \"%s\" (%s) [n:%d, a:%d]" % ( e['title'],e['start'],nowunixtime,alarm_at_unixtime ))
         events_lock.release()
-        debug("p_e_t: finished at %s" % time.ctime())
+        debug("p_e_t: finished")
         # we can't just sleep until the next event as the other thread MIGHT
         # add something new meanwhile
         time.sleep(alarm_sleeptime)
@@ -258,7 +261,7 @@ while 1:
         connectionstatus=do_login(cs)
         time.sleep(login_retry_sleeptime)
     else:
-        debug("main thread: running at %s " % time.ctime())
+        debug("main thread: running")
         # today
         range_start=time.strftime("%Y-%m-%d",time.localtime())
         # tommorrow, or later
@@ -277,5 +280,5 @@ while 1:
                 else:
                     debug("-> past already")
         events_lock.release()
-        debug("main thread: finished at %s, sleeping %d secs " % ( time.ctime(), query_sleeptime ))
+        debug("main thread: finished")
         time.sleep(query_sleeptime)
