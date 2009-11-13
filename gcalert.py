@@ -14,7 +14,6 @@
 # - add 'Location' string from feed
 # - only use the 'popup' alerts, not the email/sms ones
 # - warn for unsecure permissions of the password/secret file
-# - properly exit at first ^C or some other mechanism
 # - option for strftime in alarms
 # - use some sort of proper logging with log levels etc
 
@@ -31,6 +30,8 @@ import thread
 # magical date parser and timezone handler
 from dateutil.tz import *
 from dateutil.parser import *
+
+import signal
 
 # -------------------------------------------------------------------------------------------
 # default values for parameters
@@ -58,6 +59,14 @@ def message(s):
 def debug(s):
     if (debug_flag):
         message("DEBUG: %s" % s)
+
+# ----------------------------
+# signal handlers are easier than wrapping the whole show
+# into one giant try/except looking for KeyboardInterrupt
+# besides we have two threads to shut down
+def stopthismadness(signl, frme):
+	print " -- shutting down on keyboard interrupt"
+	sys.exit(0)
 
 # ----------------------------
 # get the list of 'magic strings' used to identify each calendar
@@ -255,6 +264,9 @@ cs.source = 'gcalert-Calendar_Alerter-0.1'
 
 thread.start_new_thread(process_events_thread,())
 connectionstatus=do_login(cs)
+
+# set up ^C handler
+signal.signal( signal.SIGINT, stopthismadness ) 
 
 while 1:
     if(not connectionstatus):
