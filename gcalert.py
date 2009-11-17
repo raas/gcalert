@@ -187,11 +187,11 @@ def usage():
     print "                    Default: $HOME/.gcalert_secret"
     print " -d, --debug      : produce debug messages"
     print " -q N, --query=N  : poll Google every N seconds for newly added events"
-    print "                    (default: 180)"
-    print " -a M, --alarm=M  : awake and produce alarms every N seconds(default: 30)"
+    print "                    (default: %d)" % query_sleeptime
+    print " -a M, --alarm=M  : awake and produce alarms every N seconds(default: %d)" % alarm_sleeptime
     print " -l L, --look=L   : \"look ahead\" L days in the calendar for events"
-    print "                    (default: 3)"
-    print " -r R, --retry=R  : sleep R seconds between reconnect attempts (default: 300)"
+    print "                    (default: %d)" % lookahead_days
+    print " -r R, --retry=R  : sleep R seconds between reconnect attempts (default: %d)" % login_retry_sleeptime
 
 # -------------------------------------------------------------------------------------------
 # the main thread will start up, then launch the background 'alarmer' thread,
@@ -204,8 +204,7 @@ except getopt.GetoptError, err:
     # print help information and exit:
     print str(err) # will print something like "option -a not recognized"
     sys.exit(2)
-output = None
-verbose = False
+
 try:
     for o, a in opts:
         if o == "-d":
@@ -226,8 +225,8 @@ try:
             lookahead_days=int(a)
             debug("lookahead_days set to %d" % lookahead_days)
         elif o in ("-r", "--retry"):
-            lookahead_days=int(a)
-            debug("login_retry_sleeptime set to %d" % lookahead_days)
+            login_retry_sleeptime=int(a)
+            debug("login_retry_sleeptime set to %d" % login_retry_sleeptime)
         else:
             assert False, "unhandled option"
 except ValueError:
