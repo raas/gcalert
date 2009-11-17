@@ -1,0 +1,40 @@
+GCalert -- Inobtrusive lightweight Google Calendar alerter 
+(C) Copyright Andras HORVATH, 2009
+
+----------------------------------------------------------------------------
+
+Copyright 2009 Andras Horvath (andras.horvath nospamat gmailcom) This
+program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your
+option) any later version.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+----------------------------------------------------------------------------
+
+This code will access all your Google calendars and display alarms via
+libnotify for whenever you have alarms set.
+
+Libnotify alarms are, usually, little windows that _receive no focus_
+(thus do not take keyboard input away from other applications) yet are
+clearly visible even on a cluttered desktop.
+
+Requirements (in debian-style package names):
+python-notify python-gdata python-dateutil notification-daemon 
+
+SECURITY NOTE: this code uses python-gdata. The current Ubuntu version
+of that library, 1.2.4, will do the authentication in an encrypted
+fashion but the actual calendars will be transmitted in cleartext. If
+this is not what you want but instead prefer the whole exchange to occur
+over an encrypted channel, consider applying the patch found at
+http://groups.google.com/group/gdata-python-client-library-contributors/browse_thread/thread/48254170a6f6818a?pli=1
+
+Also: getting 'thrown out' from Google Services is apparently normal,
+GCalert will reconnect automatically.
