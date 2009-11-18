@@ -6,6 +6,24 @@
 #
 # Requires: python-notify python-gdata python-dateutil notification-daemon
 #
+# ----------------------------------------------------------------------------
+# 
+# Copyright 2009 Andras Horvath (andras.horvath nospamat gmailcom) This
+# program is free software: you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your
+# option) any later version.
+# 
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License along
+# with this program.  If not, see <http://www.gnu.org/licenses/>.
+# 
+# ----------------------------------------------------------------------------
+#
 # FIXME:
 # - gracious handling of missing pynotify 
 # - funky icon for libnotify alert:)
@@ -179,7 +197,6 @@ def process_events_thread():
 # ----------------------------
 def usage():
     print "Poll Google Calendar and display alarms on events that have alarms defined."
-    print "Andras.Horvath@gmail.com, 2009\n"
     print "Usage: gcalert.py [options]"
     print " -s F, --secret=F : specify location of a file containing"
     print "                    username and password, newline-separated"
