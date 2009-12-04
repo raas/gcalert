@@ -71,6 +71,7 @@ connected=False # google connection is disconnected
 # ----------------------------
 def message(s):
     print "%s gcalert.py: %s" % ( time.asctime(), s)
+    sys.stdout.flush()
 
 def debug(s):
     if (debug_flag):
@@ -81,7 +82,7 @@ def debug(s):
 # into one giant try/except looking for KeyboardInterrupt
 # besides we have two threads to shut down
 def stopthismadness(signl, frme):
-	print " -- shutting down on keyboard interrupt"
+	message("shutting down on SIGINT")
 	sys.exit(0)
 
 # ----------------------------
@@ -161,6 +162,7 @@ def do_login(cs):
 def process_events_thread():
     # initialize alarm system
     if not pynotify.init("Basics"):
+        print "Could not initialize pynotify / libnotify!"
         sys.exit(1)
     time.sleep(3) # offset :)
     while 1:
