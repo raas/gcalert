@@ -118,9 +118,20 @@ def DateRangeQuery(cs, start_date='2007-01-01', end_date='2007-07-01'):
                         # it's a separate 'event' for each reminder
                         # start/end times are datetime.datetime() objects here
                         # created by dateutil.parser.parse()
+                        start=parse(a_when.start_time)
+                        end=parse(a_when.end_time)
+                        # Google sometimes does not supply timezones
+                        # (for events that last more than a day and no time set, apparently)
+                        # python can't compare two dates if only one has TZ info
+                        if not start.tzname():
+                            start=start.replace(tzinfo=tzlocal())
+                        if not end.tzname():
+                            end=end.replace(tzinfo=tzlocal())
+                        # event (one for each alarm instance) is done,
+                        # add it to the list
                         el.append({'title':an_event.title.text, 
-                                   'start':parse(a_when.start_time),
-                                   'end':parse(a_when.end_time),
+                                   'start':start,
+                                   'end':end,
                                    'minutes':a_rem.minutes})
     except Exception as error: # FIXME clearer
         message( "Google connection lost, will re-connect" )
@@ -299,12 +310,13 @@ while 1:
         now=time.time()
         # remove stale events
         for n in events:
-            if not n in newevents:
+            if not (n in newevents):
                 debug('Event deleted or modified: %s' % n)
                 events.remove(n)
         # add new events to the list
         for n in newevents:
-            if not n in events:
+            debug('Is new event N really new? THIS: %s' % n)
+            if not (n in events):
                 debug('Received event: %s' % n)
                 # does it start in the future?
                 if now<int(n['start'].astimezone(tzlocal()).strftime('%s')):
