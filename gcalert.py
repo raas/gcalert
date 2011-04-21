@@ -27,7 +27,6 @@
 # FIXME:
 # - funky icon for libnotify alert:)
 # - add 'Location' string from feed
-# - only use the 'popup' alerts, not the email/sms ones
 # - warn for unsecure permissions of the password/secret file
 # - option for strftime in alarms
 # - use some sort of proper logging with log levels etc
@@ -126,24 +125,26 @@ def date_range_query(cs, start_date='2007-01-01', end_date='2007-07-01'):
             for an_event in feed.entry:
                 for a_when in an_event.when:
                     for a_rem in a_when.reminder:
-                        # it's a separate 'event' for each reminder
-                        # start/end times are datetime.datetime() objects here
-                        # created by dateutil.parser.parse()
-                        start=parse(a_when.start_time)
-                        end=parse(a_when.end_time)
-                        # Google sometimes does not supply timezones
-                        # (for events that last more than a day and no time set, apparently)
-                        # python can't compare two dates if only one has TZ info
-                        if not start.tzname():
-                            start=start.replace(tzinfo=tzlocal())
-                        if not end.tzname():
-                            end=end.replace(tzinfo=tzlocal())
-                        # event (one for each alarm instance) is done,
-                        # add it to the list
-                        el.append({'title':an_event.title.text, 
-                                   'start':start,
-                                   'end':end,
-                                   'minutes':a_rem.minutes})
+                        debug("event TEXT: %s METHOD: %s" % (a_rem.text, a_rem.method) )
+                        if a_rem.method == 'alert': # 'popup' in the web interface
+                            # it's a separate 'event' for each reminder
+                            # start/end times are datetime.datetime() objects here
+                            # created by dateutil.parser.parse()
+                            start=parse(a_when.start_time)
+                            end=parse(a_when.end_time)
+                            # Google sometimes does not supply timezones
+                            # (for events that last more than a day and no time set, apparently)
+                            # python can't compare two dates if only one has TZ info
+                            if not start.tzname():
+                                start=start.replace(tzinfo=tzlocal())
+                            if not end.tzname():
+                                end=end.replace(tzinfo=tzlocal())
+                            # event (one for each alarm instance) is done,
+                            # add it to the list
+                            el.append({'title':an_event.title.text, 
+                                       'start':start,
+                                       'end':end,
+                                       'minutes':a_rem.minutes})
     except Exception as error: # FIXME clearer
         message( "Google connection lost, will re-connect" )
         debug( "Google connection lost: %s" % error )
@@ -298,7 +299,7 @@ except Exception as error:
 #
 # tcpdump if unsure ;)
 cs.ssl = True;
-cs.source = 'gcalert-Calendar_Alerter-0.2'
+cs.source = 'gcalert-Calendar_Alerter-1.3'
 
 thread.start_new_thread(process_events_thread,())
 connectionstatus = do_login(cs)
