@@ -31,6 +31,10 @@
 # - warn for unsecure permissions of the password/secret file
 # - option for strftime in alarms
 # - use some sort of proper logging with log levels etc
+# - options for selecting which calendars to alert (currently: all of them)
+# - snooze buttons
+# - proper main() instead of global vars, make this a good library as well as a program
+# - testing (as in, unit testing), after having a main()
 
 import getopt
 import sys
@@ -38,41 +42,41 @@ import os
 import time
 import urllib
 import thread
-# magical date parser and timezone handler
-
 import signal
-
-# these come from separate packages, the rest is in the standard library so
-# those are expected to work :)
+# dependencies below come from separate packages, the rest (above) is in the
+# standard library so those are expected to work :)
 try:
+    # google calendar stuff
     from gdata.calendar.service import *
     import gdata.service
     import gdata.calendar
+    # libnotify handler
     import pynotify
+    # magical date parser and timezone handler
     from dateutil.tz import *
     from dateutil.parser import *
 except ImportError as e:
-    print "Dependency was not found: %s" % e
+    print "Dependency was not found! %s" % e
     print "(Try: apt-get install python-notify python-gdata python-dateutil notification-daemon)"
     sys.exit(1)
 
 # -------------------------------------------------------------------------------------------
 # default values for parameters
 
-secrets_file=os.path.join(os.environ["HOME"],".gcalert_secret")
-alarm_sleeptime=30 # seconds between waking up to check alarm list
-query_sleeptime=180 # seconds between querying Google 
-lookahead_days=3 # look this many days in the future
-debug_flag=False
-login_retry_sleeptime=300 # seconds between reconnects in case of errors
+secrets_file = os.path.join(os.environ["HOME"],".gcalert_secret")
+alarm_sleeptime = 30 # seconds between waking up to check alarm list
+query_sleeptime = 180 # seconds between querying Google 
+lookahead_days = 3 # look this many days in the future
+debug_flag = False
+login_retry_sleeptime = 300 # seconds between reconnects in case of errors
 # -------------------------------------------------------------------------------------------
 # end of user-changeable stuff here
 # -------------------------------------------------------------------------------------------
 
 events=[] # all events seen so far that are yet to start
 events_lock=thread.allocate_lock() # hold to access events[]
-alarmed_events=[] # events (occurences etc) already done, minus those in the past
-connected=False # google connection is disconnected
+alarmed_events = [] # events (occurences etc) already done, minus those in the past
+connected = False # google connection is disconnected
 
 # print debug messages if -d was given
 # ----------------------------
@@ -111,7 +115,7 @@ def get_user_calendars(cs):
 #
 # returns (connectionstatus, eventlist)
 def date_range_query(cs, start_date='2007-01-01', end_date='2007-07-01'):
-    el=[] # event occurence list
+    el = [] # event occurence list
     try:
         for username in get_user_calendars(cs):
             query = gdata.calendar.service.CalendarEventQuery(username, 'private', 'full')
@@ -182,15 +186,15 @@ def process_events_thread():
     if not pynotify.init("Basics"):
         print "Could not initialize pynotify / libnotify!"
         sys.exit(1)
-    time.sleep(3) # offset :)
+    time.sleep(3) # offset :) needed by pynotify somehow?
     while 1:
-        nowunixtime=time.time()
+        nowunixtime = time.time()
         # throw away old events
         debug("p_e_t: running")
         events_lock.acquire()
         for e in events:
-            e_start_unixtime=int(e['start'].astimezone(tzlocal()).strftime('%s'))
-            if e_start_unixtime<nowunixtime:
+            e_start_unixtime = int(e['start'].astimezone(tzlocal()).strftime('%s'))
+            if e_start_unixtime < nowunixtime:
                 debug("p_e_t: removing %s, is gone" % e)
                 events.remove(e)
                 # also free up some memory
@@ -201,7 +205,7 @@ def process_events_thread():
             elif e not in alarmed_events:
                 # calculate alarm time. If it's now-ish, raise alarm
                 # otherwise, let the event sleep some more
-                alarm_at_unixtime=e_start_unixtime-60*int(e['minutes'])
+                alarm_at_unixtime = e_start_unixtime-60*int(e['minutes'])
                 # alarm now if the alarm has 'started'
                 if nowunixtime >= alarm_at_unixtime:
                     do_alarm(e)
@@ -249,19 +253,19 @@ try:
             usage()
             sys.exit()
         elif o in ("-s", "--secret"):
-            secrets_file=a
+            secrets_file = a
             debug("secrets_file set to %s" % secrets_file)
         elif o in ("-q", "--query"):
-            query_sleeptime=int(a) # FIXME handle non-integers graciously
+            query_sleeptime = int(a) # FIXME handle non-integers graciously
             debug("query_sleeptime set to %d" % query_sleeptime)
         elif o in ("-a", "--alarm"):
-            alarm_sleeptime=int(a)
+            alarm_sleeptime = int(a)
             debug("alarm_sleeptime set to %d" % alarm_sleeptime)
         elif o in ("-l", "--look"):
-            lookahead_days=int(a)
+            lookahead_days = int(a)
             debug("lookahead_days set to %d" % lookahead_days)
         elif o in ("-r", "--retry"):
-            login_retry_sleeptime=int(a)
+            login_retry_sleeptime = int(a)
             debug("login_retry_sleeptime set to %d" % login_retry_sleeptime)
         else:
             assert False, "unhandled option"
@@ -294,27 +298,28 @@ except Exception as error:
 #
 # tcpdump if unsure ;)
 cs.ssl = True;
-cs.source = 'gcalert-Calendar_Alerter-0.1'
+cs.source = 'gcalert-Calendar_Alerter-0.2'
 
 thread.start_new_thread(process_events_thread,())
-connectionstatus=do_login(cs)
+connectionstatus = do_login(cs)
 
 # set up ^C handler
 signal.signal( signal.SIGINT, stopthismadness ) 
 
+debug("SETTINGS: secrets_file: %s alarm_sleeptime: %d query_sleeptime: %d lookahead_days: %d login_retry_sleeptime: %d" % ( secrets_file, alarm_sleeptime, query_sleeptime, lookahead_days, login_retry_sleeptime ))
 while 1:
     if(not connectionstatus):
-        connectionstatus=do_login(cs)
         time.sleep(login_retry_sleeptime)
+        connectionstatus = do_login(cs)
     else:
         debug("main thread: running")
         # today
-        range_start=time.strftime("%Y-%m-%d",time.localtime())
+        range_start = time.strftime("%Y-%m-%d",time.localtime())
         # tommorrow, or later
         range_end=time.strftime("%Y-%m-%d",time.localtime(time.time()+lookahead_days*24*3600))
-        (connectionstatus,newevents)=date_range_query(cs, range_start, range_end)
+        (connectionstatus,newevents) = date_range_query(cs, range_start, range_end)
         events_lock.acquire()
-        now=time.time()
+        now = time.time()
         # remove stale events
         for n in events:
             if not (n in newevents):
@@ -326,7 +331,7 @@ while 1:
             if not (n in events):
                 debug('Received event: %s' % n)
                 # does it start in the future?
-                if now<int(n['start'].astimezone(tzlocal()).strftime('%s')):
+                if now < int(n['start'].astimezone(tzlocal()).strftime('%s')):
                     debug("-> future, adding")
                     events.append(n)
                 else:
