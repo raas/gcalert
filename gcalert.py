@@ -89,7 +89,7 @@ def stopthismadness(signl, frme):
 # get the list of 'magic strings' used to identify each calendar
 # returns: list(username) that each can be used in CalendarEventQuery()
 #
-def GetUserCalendars(cs):
+def get_user_calendars(cs):
     feed = cs.GetAllCalendarsFeed()
     # in there is the full feed URL and we need the last part (=='username')
     return map(lambda x: urllib.unquote(x.id.text.split('/')[-1]), feed.entry) 
@@ -103,10 +103,10 @@ def GetUserCalendars(cs):
 # each reminder occurence creates a new event
 #
 # returns (connectionstatus, eventlist)
-def DateRangeQuery(cs, start_date='2007-01-01', end_date='2007-07-01'):
+def date_range_query(cs, start_date='2007-01-01', end_date='2007-07-01'):
     el=[] # event occurence list
     try:
-        for username in GetUserCalendars(cs):
+        for username in get_user_calendars(cs):
             query = gdata.calendar.service.CalendarEventQuery(username, 'private', 'full')
 
             query.start_min = start_date
@@ -305,7 +305,7 @@ while 1:
         range_start=time.strftime("%Y-%m-%d",time.localtime())
         # tommorrow, or later
         range_end=time.strftime("%Y-%m-%d",time.localtime(time.time()+lookahead_days*24*3600))
-        (connectionstatus,newevents)=DateRangeQuery(cs, range_start, range_end)
+        (connectionstatus,newevents)=date_range_query(cs, range_start, range_end)
         events_lock.acquire()
         now=time.time()
         # remove stale events
