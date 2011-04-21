@@ -4,6 +4,8 @@
 # This script will periodically check your Google Calendar and display an alarm
 # when that's set for the event. It reads ALL your calendars automatically.
 #
+# Only 'popup' alarms will result in what's essentially a popup. This is a feature :)
+#
 # Requires: python-notify python-gdata python-dateutil notification-daemon
 #
 # ----------------------------------------------------------------------------
@@ -58,6 +60,10 @@ except ImportError as e:
     print "Dependency was not found! %s" % e
     print "(Try: apt-get install python-notify python-gdata python-dateutil notification-daemon)"
     sys.exit(1)
+
+# -------------------------------------------------------------------------------------------
+
+myversion = '1.3'
 
 # -------------------------------------------------------------------------------------------
 # default values for parameters
@@ -299,7 +305,7 @@ except Exception as error:
 #
 # tcpdump if unsure ;)
 cs.ssl = True;
-cs.source = 'gcalert-Calendar_Alerter-1.3'
+cs.source = 'gcalert-Calendar_Alerter-%s' % myversion
 
 thread.start_new_thread(process_events_thread,())
 connectionstatus = do_login(cs)
@@ -307,7 +313,10 @@ connectionstatus = do_login(cs)
 # set up ^C handler
 signal.signal( signal.SIGINT, stopthismadness ) 
 
+# starting up
+message("gcalert %s running..." % myversion)
 debug("SETTINGS: secrets_file: %s alarm_sleeptime: %d query_sleeptime: %d lookahead_days: %d login_retry_sleeptime: %d" % ( secrets_file, alarm_sleeptime, query_sleeptime, lookahead_days, login_retry_sleeptime ))
+
 while 1:
     if(not connectionstatus):
         time.sleep(login_retry_sleeptime)
