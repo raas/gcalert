@@ -25,7 +25,6 @@
 # ----------------------------------------------------------------------------
 #
 # FIXME:
-# - gracious handling of missing pynotify 
 # - funky icon for libnotify alert:)
 # - add 'Location' string from feed
 # - only use the 'popup' alerts, not the email/sms ones
@@ -33,21 +32,29 @@
 # - option for strftime in alarms
 # - use some sort of proper logging with log levels etc
 
-from gdata.calendar.service import *
-import gdata.service
-import gdata.calendar
 import getopt
 import sys
 import os
 import time
 import urllib
-import pynotify
 import thread
 # magical date parser and timezone handler
-from dateutil.tz import *
-from dateutil.parser import *
 
 import signal
+
+# these come from separate packages, the rest is in the standard library so
+# those are expected to work :)
+try:
+    from gdata.calendar.service import *
+    import gdata.service
+    import gdata.calendar
+    import pynotify
+    from dateutil.tz import *
+    from dateutil.parser import *
+except ImportError as e:
+    print "Dependency was not found: %s" % e
+    print "(Try: apt-get install python-notify python-gdata python-dateutil notification-daemon)"
+    sys.exit(1)
 
 # -------------------------------------------------------------------------------------------
 # default values for parameters
