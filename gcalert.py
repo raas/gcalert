@@ -106,14 +106,19 @@ def stopthismadness(signl, frme):
 # returns: list(username) that each can be used in CalendarEventQuery()
 #
 def get_user_calendars(cs):
-    feed = cs.GetAllCalendarsFeed()
+    try:
+        feed = cs.GetAllCalendarsFeed()
     # in there is the full feed URL and we need the last part (=='username')
+    except Exception as error: # FIXME clearer
+        message( "Google connection lost (%s %s), will re-connect" % (error[status], error[reason]) )
+        debug( "Google connection lost: %s" % error )
+        return None
     return map(lambda x: urllib.unquote(x.id.text.split('/')[-1]), feed.entry) 
 
 # ----------------------------
 # get a list of events happening between the given dates
 # in all calendars the user has
-# return: list of events
+# return: (success, list of events)
 #
 # each event record has fields 'title', 'start', 'end', 'minutes' 
 # each reminder occurence creates a new event
@@ -121,41 +126,40 @@ def get_user_calendars(cs):
 # returns (connectionstatus, eventlist)
 def date_range_query(cs, start_date='2007-01-01', end_date='2007-07-01'):
     el = [] # event occurence list
-    try:
-        for username in get_user_calendars(cs):
+    for username in get_user_calendars(cs):
+        try:
             query = gdata.calendar.service.CalendarEventQuery(username, 'private', 'full')
-
             query.start_min = start_date
             query.start_max = end_date 
             feed = cs.CalendarQuery(query)
-            for an_event in feed.entry:
-                for a_when in an_event.when:
-                    for a_rem in a_when.reminder:
-                        debug("event TEXT: %s METHOD: %s" % (a_rem.text, a_rem.method) )
-                        if a_rem.method == 'alert': # 'popup' in the web interface
-                            # it's a separate 'event' for each reminder
-                            # start/end times are datetime.datetime() objects here
-                            # created by dateutil.parser.parse()
-                            start=parse(a_when.start_time)
-                            end=parse(a_when.end_time)
-                            # Google sometimes does not supply timezones
-                            # (for events that last more than a day and no time set, apparently)
-                            # python can't compare two dates if only one has TZ info
-                            if not start.tzname():
-                                start=start.replace(tzinfo=tzlocal())
-                            if not end.tzname():
-                                end=end.replace(tzinfo=tzlocal())
-                            # event (one for each alarm instance) is done,
-                            # add it to the list
-                            el.append({'title':an_event.title.text, 
-                                       'start':start,
-                                       'end':end,
-                                       'minutes':a_rem.minutes})
-    except Exception as error: # FIXME clearer
-        message( "Google connection lost, will re-connect" )
-        debug( "Google connection lost: %s" % error )
-        return (False,el) # el is empty here
+        except Exception as error: # FIXME clearer
+            message( "Google connection lost (%s %s), will re-connect" % (error[status], error[reason]) )
+            debug( "Google connection lost: %s" % error )
+            return (False,el) # el is empty here
 
+        for an_event in feed.entry:
+            for a_when in an_event.when:
+                for a_rem in a_when.reminder:
+                    debug("event TEXT: %s METHOD: %s" % (a_rem.text, a_rem.method) )
+                    if a_rem.method == 'alert': # 'popup' in the web interface
+                        # it's a separate 'event' for each reminder
+                        # start/end times are datetime.datetime() objects here
+                        # created by dateutil.parser.parse()
+                        start=parse(a_when.start_time)
+                        end=parse(a_when.end_time)
+                        # Google sometimes does not supply timezones
+                        # (for events that last more than a day and no time set, apparently)
+                        # python can't compare two dates if only one has TZ info
+                        if not start.tzname():
+                            start=start.replace(tzinfo=tzlocal())
+                        if not end.tzname():
+                            end=end.replace(tzinfo=tzlocal())
+                        # event (one for each alarm instance) is done,
+                        # add it to the list
+                        el.append({'title':an_event.title.text, 
+                                   'start':start,
+                                   'end':end,
+                                   'minutes':a_rem.minutes})
     return (True,el)
 
 # ----------------------------
