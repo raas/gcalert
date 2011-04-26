@@ -28,7 +28,6 @@
 #
 # FIXME:
 # - funky icon for libnotify alert:)
-# - add 'Location' string from feed
 # - warn for unsecure permissions of the password/secret file
 # - option for strftime in alarms
 # - use some sort of proper logging with log levels etc
@@ -133,14 +132,22 @@ def date_range_query(cs, start_date='2007-01-01', end_date='2007-07-01'):
             query.start_max = end_date 
             feed = cs.CalendarQuery(query)
         except Exception as error: # FIXME clearer
-            message( "Google connection lost (%s %s), will re-connect" % (error[status], error[reason]) )
             debug( "Google connection lost: %s" % error )
+            message("Google connection lost (%s %s), will re-connect" % (error['status'], error['reason']))
             return (False,el) # el is empty here
 
         for an_event in feed.entry:
+            where_string=''
+            for a_where in an_event.where:
+                try:
+                    debug("WHERE: %s" % a_where.value_string)
+                    where_string+=a_where.value_string+" "
+                except TypeError:
+                    # not all events have 'where' fields
+                    pass
             for a_when in an_event.when:
                 for a_rem in a_when.reminder:
-                    debug("event TEXT: %s METHOD: %s" % (a_rem.text, a_rem.method) )
+                    debug("event TEXT: %s METHOD: %s" % (an_event.title.text, a_rem.method) )
                     if a_rem.method == 'alert': # 'popup' in the web interface
                         # it's a separate 'event' for each reminder
                         # start/end times are datetime.datetime() objects here
@@ -157,6 +164,7 @@ def date_range_query(cs, start_date='2007-01-01', end_date='2007-07-01'):
                         # event (one for each alarm instance) is done,
                         # add it to the list
                         el.append({'title':an_event.title.text, 
+                                   'where':where_string.strip(),
                                    'start':start,
                                    'end':end,
                                    'minutes':a_rem.minutes})
@@ -167,9 +175,12 @@ def date_range_query(cs, start_date='2007-01-01', end_date='2007-07-01'):
 # alarm one event
 def do_alarm(event):
     starttime=event['start'].astimezone(tzlocal()).strftime('%Y-%m-%d  %H:%M')
-    message( " ***** ALARM ALARM ALARM %s %s ****  " % ( event['title'],starttime )  )
+    message( " ***** ALARM ALARM ALARM %s (%s) %s ****  " % ( event['title'], event['where'], starttime )  )
     # FIXME add an icon here
-    a=pynotify.Notification( event['title'], "Starting: %s" % starttime )
+    if event['where']:
+        a=pynotify.Notification( event['title'], "Starting: %s\nWhere: %s" % (starttime, event['where']))
+    else:
+        a=pynotify.Notification( event['title'], "Starting: %s" % starttime )
     # let the alarm stay until it's closed by hand (acknowledged)
     a.set_timeout(0)
     if not a.show():
