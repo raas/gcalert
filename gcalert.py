@@ -8,6 +8,8 @@
 #
 # Requires: python-notify python-gdata python-dateutil notification-daemon
 #
+# Home: http://github.com/raas/gcalert
+#
 # ----------------------------------------------------------------------------
 # 
 # Copyright 2009 Andras Horvath (andras.horvath nospamat gmailcom) This
@@ -26,14 +28,14 @@
 # 
 # ----------------------------------------------------------------------------
 #
-# FIXME:
+# TODO:
 # - warn for unsecure permissions of the password/secret file
 # - option for strftime in alarms
 # - use some sort of proper logging with log levels etc
 # - options for selecting which calendars to alert (currently: all of them)
-# - snooze buttons
-# - proper main() instead of global vars, make this a good library as well as a program
+# - snooze buttons; this requires a gtk.main() thread and that's not trivial
 # - testing (as in, unit testing), after having a main()
+# - multi-language support
 
 import getopt
 import sys
@@ -42,21 +44,22 @@ import time
 import urllib
 import thread
 import signal
+
 # dependencies below come from separate packages, the rest (above) is in the
 # standard library so those are expected to work :)
 try:
     # google calendar stuff
-    from gdata.calendar.service import *
+    import gdata.calendar.service 
     import gdata.service
     import gdata.calendar
     # libnotify handler
     import pynotify
     # magical date parser and timezone handler
-    from dateutil.tz import *
-    from dateutil.parser import *
+    import dateutil.tz 
+    import dateutil.parser 
 except ImportError as e:
     print "Dependency was not found! %s" % e
-    print "(Try: apt-get install python-notify python-gdata python-dateutil notification-daemon)"
+    print "(Try: sudo apt-get install python-notify python-gdata python-dateutil notification-daemon)"
     sys.exit(1)
 
 # -------------------------------------------------------------------------------------------
@@ -72,57 +75,66 @@ query_sleeptime = 180 # seconds between querying Google
 lookahead_days = 3 # look this many days in the future
 debug_flag = False
 login_retry_sleeptime = 300 # seconds between reconnects in case of errors
+threads_offset = 5 # this many seconds offset between the two threads' runs
 # -------------------------------------------------------------------------------------------
 # end of user-changeable stuff here
 # -------------------------------------------------------------------------------------------
 
 events=[] # all events seen so far that are yet to start
 events_lock=thread.allocate_lock() # hold to access events[]
-alarmed_events = [] # events (occurences etc) already done, minus those in the past
+alarmed_events = [] # events (occurences etc) already alarmed
 connected = False # google connection is disconnected
 
-# print debug messages if -d was given
-# ----------------------------
 def message(s):
+    """Print one message 's' and flush the buffer; useful when redirected to a file"""
     print "%s gcalert.py: %s" % ( time.asctime(), s)
     sys.stdout.flush()
 
 def debug(s):
+    """Print debug message 's' if the debug_flag is set (running with -d option)"""
     if (debug_flag):
         message("DEBUG: %s" % s)
 
-# ----------------------------
 # signal handlers are easier than wrapping the whole show
 # into one giant try/except looking for KeyboardInterrupt
 # besides we have two threads to shut down
 def stopthismadness(signl, frme):
-	message("shutting down on SIGINT")
-	sys.exit(0)
+    """Hook up signal handler for ^C"""
+    message("shutting down on SIGINT")
+    sys.exit(0)
 
 # ----------------------------
-# get the list of 'magic strings' used to identify each calendar
-# returns: list(username) that each can be used in CalendarEventQuery()
 #
-def get_user_calendars(cs):
+def get_user_calendars(calendarservice):
+    """
+    Get the list of 'magic strings' used to identify each calendar
+    calendarservice: Calendar Service as returned by get_calendar_service()
+    returns: list(username) that each can be used in CalendarEventQuery()
+    """
     try:
-        feed = cs.GetAllCalendarsFeed()
+        feed = calendarservice.GetAllCalendarsFeed()
     # in there is the full feed URL and we need the last part (=='username')
     except Exception as error: # FIXME clearer
-        message( "Google connection lost (%s %s), will re-connect" % (error[status], error[reason]) )
         debug( "Google connection lost: %s" % error )
+        try:
+            message( "Google connection lost (%s %s), will re-connect" % (error['status'], error['reason']) )
+        except Exception:
+            message( "Google connection lost with unknown error, will re-connect: %s " % error )
         return None
     return map(lambda x: urllib.unquote(x.id.text.split('/')[-1]), feed.entry) 
 
 # ----------------------------
-# get a list of events happening between the given dates
-# in all calendars the user has
-# return: (success, list of events)
-#
-# each event record has fields 'title', 'start', 'end', 'minutes' 
-# each reminder occurence creates a new event
-#
-# returns (connectionstatus, eventlist)
 def date_range_query(cs, start_date='2007-01-01', end_date='2007-07-01'):
+    """
+    Get a list of events happening between the given dates in all calendars the user has
+    cs: Calendar Service as returned by get_calendar_service()
+    returns: (success, list of events)
+    
+    Each event record has fields 'title', 'start', 'end', 'minutes' 
+    Each reminder occurence creates a new event
+    'start' and 'end' are dateutil.parser.parse() objects
+    """
+    
     el = [] # event occurence list
     for username in get_user_calendars(cs):
         try:
@@ -132,7 +144,10 @@ def date_range_query(cs, start_date='2007-01-01', end_date='2007-07-01'):
             feed = cs.CalendarQuery(query)
         except Exception as error: # FIXME clearer
             debug( "Google connection lost: %s" % error )
-            message("Google connection lost (%s %s), will re-connect" % (error['status'], error['reason']))
+            try:
+                message( "Google connection lost (%s %s), will re-connect" % (error['status'], error['reason']) )
+            except Exception:
+                message( "Google connection lost with unknown error, will re-connect: %s " % error )
             return (False,el) # el is empty here
 
         for an_event in feed.entry:
@@ -151,15 +166,15 @@ def date_range_query(cs, start_date='2007-01-01', end_date='2007-07-01'):
                         # it's a separate 'event' for each reminder
                         # start/end times are datetime.datetime() objects here
                         # created by dateutil.parser.parse()
-                        start=parse(a_when.start_time)
-                        end=parse(a_when.end_time)
+                        start=dateutil.parser.parse(a_when.start_time)
+                        end=dateutil.parser.parse(a_when.end_time)
                         # Google sometimes does not supply timezones
                         # (for events that last more than a day and no time set, apparently)
                         # python can't compare two dates if only one has TZ info
                         if not start.tzname():
-                            start=start.replace(tzinfo=tzlocal())
+                            start=start.replace(tzinfo=dateutil.tz.tzlocal())
                         if not end.tzname():
-                            end=end.replace(tzinfo=tzlocal())
+                            end=end.replace(tzinfo=dateutil.tz.tzlocal())
                         # event (one for each alarm instance) is done,
                         # add it to the list
                         el.append({'title':an_event.title.text, 
@@ -173,48 +188,52 @@ def date_range_query(cs, start_date='2007-01-01', end_date='2007-07-01'):
 
 # alarm one event
 def do_alarm(event):
-    starttime=event['start'].astimezone(tzlocal()).strftime('%Y-%m-%d  %H:%M')
+    """Show one alarm box for one event/recurrence"""
+    starttime=event['start'].astimezone(dateutil.tz.tzlocal()).strftime('%Y-%m-%d  %H:%M')
     message( " ***** ALARM ALARM ALARM %s (%s) %s ****  " % ( event['title'], event['where'], starttime )  )
-    # FIXME add an icon here
     if event['where']:
         a=pynotify.Notification( event['title'], "<b>Starting:</b> %s\n<b>Where:</b> %s" % (starttime, event['where']), 'gtk-dialog-info')
     else:
         a=pynotify.Notification( event['title'], "<b>Starting:</b> %s" % starttime, 'gtk-dialog-info')
     # let the alarm stay until it's closed by hand (acknowledged)
-    a.set_timeout(0)
+    a.set_timeout(pynotify.EXPIRES_NEVER)
     if not a.show():
         message( "Failed to send alarm notification!" )
 
 # ----------------------------
-# try to log in, return logged-in-ness (true for success)
-def do_login(cs):
+def do_login(calendarservice):
+    """
+    (Re)Login to Google Calendar.
+    This sometimes fails or the connection dies, so do_login() needs to be done again.
+    
+    calendarservice: as returned by get_calendar_service()
+    returns: True or False (logged-in or failed)
+    
+    """
     try:
-        cs.ProgrammaticLogin()
-    #except gdata.service.Error: # seriously, yes, "Error"
+        calendarservice.ProgrammaticLogin()
     except Exception as error:
-        message( 'Failed to authenticate to Google as %s' % cs.email )
+        message( 'Failed to authenticate to Google as %s' % calendarservice.email )
         debug( 'Failed to authenticate to Google: %s' % error )
         message( 'Check username, password and that the account is enabled.' )
         return False
-    message( "Logged in to Google Calendar as %s" % cs.email )
+    message( "Logged in to Google Calendar as %s" % calendarservice.email )
     return True # we're logged in
 
 # -------------------------------------------------------------------------------------------
-# alarming on events is run as a background op
-#
 def process_events_thread():
-    # initialize alarm system
+    """Process events and raise alarms via pynotify"""
+    # initialize notification system
     if not pynotify.init('gcalert-Calendar_Alerter-%s' % myversion):
         print "Could not initialize pynotify / libnotify!"
         sys.exit(1)
-    time.sleep(3) # offset :) needed by pynotify somehow?
+    time.sleep(threads_offset) # give a chance for the other thread to get some events
     while 1:
         nowunixtime = time.time()
-        # throw away old events
         debug("p_e_t: running")
         events_lock.acquire()
         for e in events:
-            e_start_unixtime = int(e['start'].astimezone(tzlocal()).strftime('%s'))
+            e_start_unixtime = int(e['start'].astimezone(dateutil.tz.tzlocal()).strftime('%s'))
             if e_start_unixtime < nowunixtime:
                 debug("p_e_t: removing %s, is gone" % e)
                 events.remove(e)
@@ -233,14 +252,16 @@ def process_events_thread():
                     alarmed_events.append(e)
                 else:
                     debug("p_e_t: not yet: \"%s\" (%s) [n:%d, a:%d]" % ( e['title'],e['start'],nowunixtime,alarm_at_unixtime ))
+            else:
+                    debug("p_e_t: already alarmed: \"%s\" (%s) [n:%d, a:%d]" % ( e['title'],e['start'],nowunixtime,alarm_at_unixtime ))
         events_lock.release()
         debug("p_e_t: finished")
         # we can't just sleep until the next event as the other thread MIGHT
         # add something new meanwhile
         time.sleep(alarm_sleeptime)
 
-# ----------------------------
 def usage():
+    """Print usage information."""
     print "Poll Google Calendar and display alarms on events that have alarms defined."
     print "Usage: gcalert.py [options]"
     print " -s F, --secret=F : specify location of a file containing"
@@ -254,112 +275,128 @@ def usage():
     print "                    (default: %d)" % lookahead_days
     print " -r R, --retry=R  : sleep R seconds between reconnect attempts (default: %d)" % login_retry_sleeptime
 
-# -------------------------------------------------------------------------------------------
-# the main thread will start up, then launch the background 'alarmer' thread,
-# and proceed check the calendar every so often
-#
+def get_calendar_service():
+    """
+    Get hold of a CalendarService() and stick username/password info in it, plus some settings.
+    Return the results if successful, exit the program if not.
+    """
+    # get credentials from file
+    cs = gdata.calendar.service.CalendarService()
+    try:
+        # the 'password file' should contain two lines with username and password
+        # the :2 is there to allow a newline at the end
+        (cs.email, cs.password) = open(secrets_file).read().split('\n')[:2]
+    except IOError as error:
+        print error 
+        sys.exit(1)
+    except ValueError:
+        print "Password file %s should contain two newline-separated lines: username (without gmail.com) and password." % secrets_file
+        sys.exit(2)
+    except Exception as error:
+        print "Something unhandled went wrong reading your password file '%s', please report this as a bug." % secrets_file
+        print error
+        sys.exit(3)
 
-try:
-    opts, args = getopt.getopt(sys.argv[1:], "hds:q:a:l:r:", ["help", "debug", "secret=", "query=", "alarm=", "look=", "retry="])
-except getopt.GetoptError, err:
-    # print help information and exit:
-    print str(err) # will print something like "option -a not recognized"
-    sys.exit(2)
+    # Full-fledged SSL needs the SSL patch (to python-gdata_1.2.4-0ubuntu2 at least)
+    # see http://groups.google.com/group/gdata-python-client-library-contributors/browse_thread/thread/48254170a6f6818a?pli=1
+    #
+    # if not present, the login will go over SSL
+    # but the actual calendar will be retrieved over plain HTTP
+    #
+    # tcpdump if unsure ;)
+    cs.ssl = True;
+    cs.source = 'gcalert-Calendar_Alerter-%s' % myversion
+    return cs
 
-try:
-    for o, a in opts:
-        if o == "-d":
-            debug_flag = True
-        elif o in ("-h", "--help"):
-            usage()
-            sys.exit()
-        elif o in ("-s", "--secret"):
-            secrets_file = a
-            debug("secrets_file set to %s" % secrets_file)
-        elif o in ("-q", "--query"):
-            query_sleeptime = int(a) # FIXME handle non-integers graciously
-            debug("query_sleeptime set to %d" % query_sleeptime)
-        elif o in ("-a", "--alarm"):
-            alarm_sleeptime = int(a)
-            debug("alarm_sleeptime set to %d" % alarm_sleeptime)
-        elif o in ("-l", "--look"):
-            lookahead_days = int(a)
-            debug("lookahead_days set to %d" % lookahead_days)
-        elif o in ("-r", "--retry"):
-            login_retry_sleeptime = int(a)
-            debug("login_retry_sleeptime set to %d" % login_retry_sleeptime)
+def update_events_thread():
+    """Periodically sync the 'events' list to what's in Google Calendar"""
+    connectionstatus = do_login(cs)
+    while 1:
+        if(not connectionstatus):
+            time.sleep(login_retry_sleeptime)
+            connectionstatus = do_login(cs)
         else:
-            assert False, "unhandled option"
-except ValueError:
-    print "Option %s requires an integer parameter; use '-h' for help." % o
-    sys.exit(1)
+            debug("u_e_t: running")
+            # today
+            range_start = time.strftime("%Y-%m-%d",time.localtime())
+            # tommorrow, or later
+            range_end=time.strftime("%Y-%m-%d",time.localtime(time.time()+lookahead_days*24*3600))
+            (connectionstatus,newevents) = date_range_query(cs, range_start, range_end)
+            events_lock.acquire()
+            now = time.time()
+            # remove stale events
+            for n in events:
+                if not (n in newevents):
+                    debug('Event deleted or modified: %s' % n)
+                    events.remove(n)
+            # add new events to the list
+            for n in newevents:
+                debug('Is new event N really new? THIS: %s' % n)
+                if not (n in events):
+                    debug('Received event: %s' % n)
+                    # does it start in the future?
+                    if now < int(n['start'].astimezone(dateutil.tz.tzlocal()).strftime('%s')):
+                        debug("-> future, adding")
+                        events.append(n)
+                    else:
+                        debug("-> past already")
+            events_lock.release()
+            debug("u_e_t: finished")
+            time.sleep(query_sleeptime)
 
-# get credentials from file
-cs = CalendarService()
-try:
-    # the 'password file' should contain two lines with username and password
-    # the :2 is there to allow a newline at the end
-    (cs.email, cs.password) = open(secrets_file).read().split('\n')[:2]
-except IOError as error:
-    print error 
-    sys.exit(1)
-except ValueError:
-    print "Password file %s should contain two newline-separated lines: username (without gmail.com) and password." % secrets_file
-    sys.exit(2)
-except Exception as error:
-    print "Something unhandled went wrong reading your password file '%s', please report this as a bug." % secrets_file
-    print error
-    sys.exit(3)
+if __name__ == '__main__':
+    # -------------------------------------------------------------------------------------------
+    # the main thread will start up, then launch the background 'alarmer' thread,
+    # and proceed check the calendar every so often
+    #
 
-# Full-fledged SSL needs the SSL patch (to python-gdata_1.2.4-0ubuntu2 at least)
-# see http://groups.google.com/group/gdata-python-client-library-contributors/browse_thread/thread/48254170a6f6818a?pli=1
-#
-# if not present, the login will go over SSL
-# but the actual calendar will be retrieved over plain HTTP
-#
-# tcpdump if unsure ;)
-cs.ssl = True;
-cs.source = 'gcalert-Calendar_Alerter-%s' % myversion
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], "hds:q:a:l:r:", ["help", "debug", "secret=", "query=", "alarm=", "look=", "retry="])
+    except getopt.GetoptError as err:
+        # print help information and exit:
+        print str(err) # will print something like "option -a not recognized"
+        sys.exit(2)
 
-thread.start_new_thread(process_events_thread,())
-connectionstatus = do_login(cs)
+    try:
+        for o, a in opts:
+            if o == "-d":
+                debug_flag = True
+            elif o in ("-h", "--help"):
+                usage()
+                sys.exit()
+            elif o in ("-s", "--secret"):
+                secrets_file = a
+                debug("secrets_file set to %s" % secrets_file)
+            elif o in ("-q", "--query"):
+                query_sleeptime = int(a) # FIXME handle non-integers graciously
+                debug("query_sleeptime set to %d" % query_sleeptime)
+            elif o in ("-a", "--alarm"):
+                alarm_sleeptime = int(a)
+                debug("alarm_sleeptime set to %d" % alarm_sleeptime)
+            elif o in ("-l", "--look"):
+                lookahead_days = int(a)
+                debug("lookahead_days set to %d" % lookahead_days)
+            elif o in ("-r", "--retry"):
+                login_retry_sleeptime = int(a)
+                debug("login_retry_sleeptime set to %d" % login_retry_sleeptime)
+            else:
+                assert False, "unhandled option"
+    except ValueError:
+        print "Option %s requires an integer parameter; use '-h' for help." % o
+        sys.exit(1)
 
-# set up ^C handler
-signal.signal( signal.SIGINT, stopthismadness ) 
+    cs = get_calendar_service()
 
-# starting up
-message("gcalert %s running..." % myversion)
-debug("SETTINGS: secrets_file: %s alarm_sleeptime: %d query_sleeptime: %d lookahead_days: %d login_retry_sleeptime: %d" % ( secrets_file, alarm_sleeptime, query_sleeptime, lookahead_days, login_retry_sleeptime ))
+    # set up ^C handler
+    signal.signal( signal.SIGINT, stopthismadness ) 
 
-while 1:
-    if(not connectionstatus):
-        time.sleep(login_retry_sleeptime)
-        connectionstatus = do_login(cs)
-    else:
-        debug("main thread: running")
-        # today
-        range_start = time.strftime("%Y-%m-%d",time.localtime())
-        # tommorrow, or later
-        range_end=time.strftime("%Y-%m-%d",time.localtime(time.time()+lookahead_days*24*3600))
-        (connectionstatus,newevents) = date_range_query(cs, range_start, range_end)
-        events_lock.acquire()
-        now = time.time()
-        # remove stale events
-        for n in events:
-            if not (n in newevents):
-                debug('Event deleted or modified: %s' % n)
-                events.remove(n)
-        # add new events to the list
-        for n in newevents:
-            debug('Is new event N really new? THIS: %s' % n)
-            if not (n in events):
-                debug('Received event: %s' % n)
-                # does it start in the future?
-                if now < int(n['start'].astimezone(tzlocal()).strftime('%s')):
-                    debug("-> future, adding")
-                    events.append(n)
-                else:
-                    debug("-> past already")
-        events_lock.release()
-        debug("main thread: finished")
-        time.sleep(query_sleeptime)
+    # start up the event processing thread
+    debug("Starting p_e_t")
+    thread.start_new_thread(process_events_thread,())
+
+    # starting up
+    message("gcalert %s running..." % myversion)
+    debug("SETTINGS: secrets_file: %s alarm_sleeptime: %d query_sleeptime: %d lookahead_days: %d login_retry_sleeptime: %d" % ( secrets_file, alarm_sleeptime, query_sleeptime, lookahead_days, login_retry_sleeptime ))
+    
+    update_events_thread()
+
