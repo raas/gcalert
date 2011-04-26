@@ -27,7 +27,6 @@
 # ----------------------------------------------------------------------------
 #
 # FIXME:
-# - funky icon for libnotify alert:)
 # - warn for unsecure permissions of the password/secret file
 # - option for strftime in alarms
 # - use some sort of proper logging with log levels etc
@@ -178,9 +177,9 @@ def do_alarm(event):
     message( " ***** ALARM ALARM ALARM %s (%s) %s ****  " % ( event['title'], event['where'], starttime )  )
     # FIXME add an icon here
     if event['where']:
-        a=pynotify.Notification( event['title'], "Starting: %s\nWhere: %s" % (starttime, event['where']))
+        a=pynotify.Notification( event['title'], "<b>Starting:</b> %s\n<b>Where:</b> %s" % (starttime, event['where']), 'gtk-dialog-info')
     else:
-        a=pynotify.Notification( event['title'], "Starting: %s" % starttime )
+        a=pynotify.Notification( event['title'], "<b>Starting:</b> %s" % starttime, 'gtk-dialog-info')
     # let the alarm stay until it's closed by hand (acknowledged)
     a.set_timeout(0)
     if not a.show():
@@ -205,7 +204,7 @@ def do_login(cs):
 #
 def process_events_thread():
     # initialize alarm system
-    if not pynotify.init("Basics"):
+    if not pynotify.init('gcalert-Calendar_Alerter-%s' % myversion):
         print "Could not initialize pynotify / libnotify!"
         sys.exit(1)
     time.sleep(3) # offset :) needed by pynotify somehow?
