@@ -85,15 +85,76 @@ events_lock=thread.allocate_lock() # hold to access events[]
 alarmed_events = [] # events (occurences etc) already alarmed
 connected = False # google connection is disconnected
 
+class GcEvent(object):
+    """
+    One event occurence (actually, one alarm for an event)
+    """
+    def __init__(self, title, where, start_string, end_string, minutes):
+        """
+        title: event title text
+        where: where is the event (or empty string)
+        start_string: event start time as string
+        end_string: event end time as string
+        minutes: how many minutes before the start is the alarm to go off
+        """
+        self.title=title
+        self.where=where
+        self.start=dateutil.parser.parse(start_string)
+        self.end=dateutil.parser.parse(end_string)
+        # Google sometimes does not supply timezones
+        # (for events that last more than a day and have no time set, apparently)
+        # python can't compare two dates if only one has TZ info
+        # this might screw us at, say, if DST changes between when we get the event and its alarm
+        if not self.start.tzname():
+            self.start=self.start.replace(tzinfo=dateutil.tz.tzlocal())
+        if not self.end.tzname():
+            self.end=self.end.replace(tzinfo=dateutil.tz.tzlocal())
+        self.minutes=minutes
+
+    def get_starttime_str(self):
+        """Start time in local timezone, as a preformatted string"""
+        return self.start.astimezone(dateutil.tz.tzlocal()).strftime('%Y-%m-%d  %H:%M')
+
+    def get_starttime_unix(self):
+        """Start time in unix time"""
+        return int(self.start.astimezone(dateutil.tz.tzlocal()).strftime('%s'))
+
+    def get_alarm_time_unix(self):
+        """Alarm time in unix time"""
+        return self.starttime_unix-60*int(self.minutes)
+
+    starttime_str=property(fget=get_starttime_str) 
+    starttime_unix=property(fget=get_starttime_unix) 
+    alarm_time_unix=property(fget=get_alarm_time_unix) 
+
+    def alarm(self):
+        """Show the alarm box for one event/recurrence"""
+        message( " ***** ALARM ALARM ALARM: %s (%s) %s ****  " % ( self.title, self.where, self.starttime_str )  )
+        if self.where:
+            a=pynotify.Notification( self.title, "<b>Starting:</b> %s\n<b>Where:</b> %s" % (self.starttime_str, self.where), 'gtk-dialog-info')
+        else:
+            a=pynotify.Notification( self.title, "<b>Starting:</b> %s" % self.starttime_str, 'gtk-dialog-info')
+        # let the alarm stay until it's closed by hand (acknowledged)
+        a.set_timeout(pynotify.EXPIRES_NEVER)
+        if not a.show():
+            message( "Failed to send alarm notification!" )
+
+
+# ----------------------------
+
 def message(s):
     """Print one message 's' and flush the buffer; useful when redirected to a file"""
     print "%s gcalert.py: %s" % ( time.asctime(), s)
     sys.stdout.flush()
 
+# ----------------------------
+
 def debug(s):
     """Print debug message 's' if the debug_flag is set (running with -d option)"""
     if (debug_flag):
         message("DEBUG: %s" % s)
+
+# ----------------------------
 
 # signal handlers are easier than wrapping the whole show
 # into one giant try/except looking for KeyboardInterrupt
@@ -130,9 +191,7 @@ def date_range_query(cs, start_date='2007-01-01', end_date='2007-07-01'):
     cs: Calendar Service as returned by get_calendar_service()
     returns: (success, list of events)
     
-    Each event record has fields 'title', 'start', 'end', 'minutes' 
-    Each reminder occurence creates a new event
-    'start' and 'end' are dateutil.parser.parse() objects
+    Each reminder occurence creates a new event (new GcEvent object)
     """
     
     el = [] # event occurence list
@@ -152,53 +211,25 @@ def date_range_query(cs, start_date='2007-01-01', end_date='2007-07-01'):
 
         for an_event in feed.entry:
             where_string=''
-            for a_where in an_event.where:
-                try:
-                    debug("WHERE: %s" % a_where.value_string)
-                    where_string+=a_where.value_string+" "
-                except TypeError:
-                    # not all events have 'where' fields
-                    pass
+            try:
+                # join all 'where' entries together; you probably only have one anyway
+                where_string=' // '.join(map(lambda w: w.value_string, an_event.where))
+            except TypeError:
+                # not all events have 'where' fields (value_string fields), and that's okay
+                pass
             for a_when in an_event.when:
                 for a_rem in a_when.reminder:
                     debug("event TEXT: %s METHOD: %s" % (an_event.title.text, a_rem.method) )
                     if a_rem.method == 'alert': # 'popup' in the web interface
-                        # it's a separate 'event' for each reminder
-                        # start/end times are datetime.datetime() objects here
-                        # created by dateutil.parser.parse()
-                        start=dateutil.parser.parse(a_when.start_time)
-                        end=dateutil.parser.parse(a_when.end_time)
-                        # Google sometimes does not supply timezones
-                        # (for events that last more than a day and no time set, apparently)
-                        # python can't compare two dates if only one has TZ info
-                        if not start.tzname():
-                            start=start.replace(tzinfo=dateutil.tz.tzlocal())
-                        if not end.tzname():
-                            end=end.replace(tzinfo=dateutil.tz.tzlocal())
                         # event (one for each alarm instance) is done,
                         # add it to the list
-                        el.append({'title':an_event.title.text, 
-                                   'where':where_string.strip(),
-                                   'start':start,
-                                   'end':end,
-                                   'minutes':a_rem.minutes})
+                        el.append(GcEvent(
+                                    an_event.title.text,
+                                    where_string,
+                                    a_when.start_time,
+                                    a_when.end_time,
+                                    a_rem.minutes))
     return (True,el)
-
-# ----------------------------
-
-# alarm one event
-def do_alarm(event):
-    """Show one alarm box for one event/recurrence"""
-    starttime=event['start'].astimezone(dateutil.tz.tzlocal()).strftime('%Y-%m-%d  %H:%M')
-    message( " ***** ALARM ALARM ALARM %s (%s) %s ****  " % ( event['title'], event['where'], starttime )  )
-    if event['where']:
-        a=pynotify.Notification( event['title'], "<b>Starting:</b> %s\n<b>Where:</b> %s" % (starttime, event['where']), 'gtk-dialog-info')
-    else:
-        a=pynotify.Notification( event['title'], "<b>Starting:</b> %s" % starttime, 'gtk-dialog-info')
-    # let the alarm stay until it's closed by hand (acknowledged)
-    a.set_timeout(pynotify.EXPIRES_NEVER)
-    if not a.show():
-        message( "Failed to send alarm notification!" )
 
 # ----------------------------
 def do_login(calendarservice):
@@ -213,8 +244,8 @@ def do_login(calendarservice):
     try:
         calendarservice.ProgrammaticLogin()
     except Exception as error:
-        message( 'Failed to authenticate to Google as %s' % calendarservice.email )
         debug( 'Failed to authenticate to Google: %s' % error )
+        message( 'Failed to authenticate to Google as %s' % calendarservice.email )
         message( 'Check username, password and that the account is enabled.' )
         return False
     message( "Logged in to Google Calendar as %s" % calendarservice.email )
@@ -233,8 +264,7 @@ def process_events_thread():
         debug("p_e_t: running")
         events_lock.acquire()
         for e in events:
-            e_start_unixtime = int(e['start'].astimezone(dateutil.tz.tzlocal()).strftime('%s'))
-            if e_start_unixtime < nowunixtime:
+            if e.starttime_unix < nowunixtime:
                 debug("p_e_t: removing %s, is gone" % e)
                 events.remove(e)
                 # also free up some memory
@@ -243,17 +273,16 @@ def process_events_thread():
             # it starts in the future
             # check for alarm times if it wasn't alarmed yet
             elif e not in alarmed_events:
-                # calculate alarm time. If it's now-ish, raise alarm
+                # check alarm time. If it's now-ish, raise alarm
                 # otherwise, let the event sleep some more
-                alarm_at_unixtime = e_start_unixtime-60*int(e['minutes'])
                 # alarm now if the alarm has 'started'
-                if nowunixtime >= alarm_at_unixtime:
-                    do_alarm(e)
+                if nowunixtime >= e.alarm_time_unix:
+                    e.alarm()
                     alarmed_events.append(e)
                 else:
-                    debug("p_e_t: not yet: \"%s\" (%s) [n:%d, a:%d]" % ( e['title'],e['start'],nowunixtime,alarm_at_unixtime ))
+                    debug("p_e_t: not yet: \"%s\" (%s) [now:%d, alarm:%d]" % ( e.title, e.starttime_str, nowunixtime, e.alarm_time_unix ))
             else:
-                    debug("p_e_t: already alarmed: \"%s\" (%s) [n:%d, a:%d]" % ( e['title'],e['start'],nowunixtime,alarm_at_unixtime ))
+                debug("p_e_t: already alarmed: \"%s\" (%s) [now:%d, alarm:%d]" % ( e.title, e.starttime_str, nowunixtime, e.alarm_time_unix ))
         events_lock.release()
         debug("p_e_t: finished")
         # we can't just sleep until the next event as the other thread MIGHT
@@ -262,6 +291,7 @@ def process_events_thread():
 
 def usage():
     """Print usage information."""
+    print "gcalert version %s" % myversion
     print "Poll Google Calendar and display alarms on events that have alarms defined."
     print "Usage: gcalert.py [options]"
     print " -s F, --secret=F : specify location of a file containing"
@@ -335,7 +365,7 @@ def update_events_thread():
                 if not (n in events):
                     debug('Received event: %s' % n)
                     # does it start in the future?
-                    if now < int(n['start'].astimezone(dateutil.tz.tzlocal()).strftime('%s')):
+                    if now < n.starttime_unix:
                         debug("-> future, adding")
                         events.append(n)
                     else:
