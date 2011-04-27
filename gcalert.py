@@ -117,6 +117,10 @@ class GcEvent(object):
         """Start time in local timezone, as a preformatted string"""
         return self.start.astimezone(dateutil.tz.tzlocal()).strftime(strftime_string)
 
+    def get_endtime_str(self):
+        """End time in local timezone, as a preformatted string"""
+        return self.end.astimezone(dateutil.tz.tzlocal()).strftime(strftime_string)
+
     def get_starttime_unix(self):
         """Start time in unix time"""
         return int(self.start.astimezone(dateutil.tz.tzlocal()).strftime('%s'))
@@ -126,6 +130,7 @@ class GcEvent(object):
         return self.starttime_unix-60*int(self.minutes)
 
     starttime_str=property(fget=get_starttime_str) 
+    endtime_str=property(fget=get_endtime_str) 
     starttime_unix=property(fget=get_starttime_unix) 
     alarm_time_unix=property(fget=get_alarm_time_unix) 
 
@@ -140,6 +145,15 @@ class GcEvent(object):
         a.set_timeout(pynotify.EXPIRES_NEVER)
         if not a.show():
             message( "Failed to send alarm notification!" )
+
+    def __str__(self):
+        return "Title: %s Where: %s Start: %s Alarm_minutes: %s" % ( self.title, self.where, self.starttime_str, self.minutes )
+
+    def __repr__(self):
+        return "GcEvent(%s, %s, %s, %s, %s)" % ( self.title, self.where, self.starttime_str, self.endtime_str, self.minutes )
+
+    def __eq__(self, other):
+        return self.__repr__() == other.__repr__()
 
 
 # ----------------------------
@@ -180,7 +194,7 @@ def get_user_calendars(calendarservice):
     except Exception as error: # FIXME clearer
         debug( "Google connection lost: %s" % error )
         try:
-            message( "Google connection lost (%s %s), will re-connect" % (error['status'], error['reason']) )
+            message( "Google connection lost (%d %s), will re-connect" % (error['status'], error['reason']) )
         except Exception:
             message( "Google connection lost with unknown error, will re-connect: %s " % error )
         return None
@@ -206,7 +220,7 @@ def date_range_query(cs, start_date='2007-01-01', end_date='2007-07-01'):
         except Exception as error: # FIXME clearer
             debug( "Google connection lost: %s" % error )
             try:
-                message( "Google connection lost (%s %s), will re-connect" % (error['status'], error['reason']) )
+                message( "Google connection lost (%d %s), will re-connect" % (error['status'], error['reason']) )
             except Exception:
                 message( "Google connection lost with unknown error, will re-connect: %s " % error )
             return (False,el) # el is empty here
