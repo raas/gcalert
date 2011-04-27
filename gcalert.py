@@ -76,6 +76,8 @@ lookahead_days = 3 # look this many days in the future
 debug_flag = False
 login_retry_sleeptime = 300 # seconds between reconnects in case of errors
 threads_offset = 5 # this many seconds offset between the two threads' runs
+strftime_string = '%Y-%m-%d  %H:%M' # in the event display
+
 # -------------------------------------------------------------------------------------------
 # end of user-changeable stuff here
 # -------------------------------------------------------------------------------------------
@@ -113,7 +115,7 @@ class GcEvent(object):
 
     def get_starttime_str(self):
         """Start time in local timezone, as a preformatted string"""
-        return self.start.astimezone(dateutil.tz.tzlocal()).strftime('%Y-%m-%d  %H:%M')
+        return self.start.astimezone(dateutil.tz.tzlocal()).strftime(strftime_string)
 
     def get_starttime_unix(self):
         """Start time in unix time"""
@@ -294,16 +296,20 @@ def usage():
     print "gcalert version %s" % myversion
     print "Poll Google Calendar and display alarms on events that have alarms defined."
     print "Usage: gcalert.py [options]"
-    print " -s F, --secret=F : specify location of a file containing"
-    print "                    username and password, newline-separated"
-    print "                    Default: $HOME/.gcalert_secret"
-    print " -d, --debug      : produce debug messages"
-    print " -q N, --query=N  : poll Google every N seconds for newly added events"
-    print "                    (default: %d)" % query_sleeptime
-    print " -a M, --alarm=M  : awake and produce alarms every N seconds(default: %d)" % alarm_sleeptime
-    print " -l L, --look=L   : \"look ahead\" L days in the calendar for events"
-    print "                    (default: %d)" % lookahead_days
-    print " -r R, --retry=R  : sleep R seconds between reconnect attempts (default: %d)" % login_retry_sleeptime
+    print " -s F, --secret=F     : specify location of a file containing"
+    print "                        username and password, newline-separated"
+    print "                        Default: $HOME/.gcalert_secret"
+    print " -d, --debug          : produce debug messages"
+    print " -q N, --query=N      : poll Google every N seconds for newly"
+    print "                        added events (default: %d)" % query_sleeptime
+    print " -a M, --alarm=M      : awake and produce alarms every N "
+    print "                        seconds (default: %d)" % alarm_sleeptime
+    print " -l L, --look=L       : \"look ahead\" L days in the calendar"
+    print "                        for events (default: %d)" % lookahead_days
+    print " -r R, --retry=R      : sleep R seconds between reconnect"
+    print "                        attempts (default: %d)" % login_retry_sleeptime
+    print " -t F, --timeformat=F : set strftime(3) string for displaying"
+    print "                        event start times (default: '%s')" % strftime_string
 
 def get_calendar_service():
     """
@@ -381,7 +387,7 @@ if __name__ == '__main__':
     #
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hds:q:a:l:r:", ["help", "debug", "secret=", "query=", "alarm=", "look=", "retry="])
+        opts, args = getopt.getopt(sys.argv[1:], "hds:q:a:l:r:t:", ["help", "debug", "secret=", "query=", "alarm=", "look=", "retry=", "timeformat="])
     except getopt.GetoptError as err:
         # print help information and exit:
         print str(err) # will print something like "option -a not recognized"
@@ -409,6 +415,9 @@ if __name__ == '__main__':
             elif o in ("-r", "--retry"):
                 login_retry_sleeptime = int(a)
                 debug("login_retry_sleeptime set to %d" % login_retry_sleeptime)
+            elif o in ("-t", "--timeformat"):
+                strftime_string = a
+                debug("strftime_string set to %s" % strftime_string)
             else:
                 assert False, "unhandled option"
     except ValueError:
@@ -426,7 +435,7 @@ if __name__ == '__main__':
 
     # starting up
     message("gcalert %s running..." % myversion)
-    debug("SETTINGS: secrets_file: %s alarm_sleeptime: %d query_sleeptime: %d lookahead_days: %d login_retry_sleeptime: %d" % ( secrets_file, alarm_sleeptime, query_sleeptime, lookahead_days, login_retry_sleeptime ))
+    debug("SETTINGS: secrets_file: %s alarm_sleeptime: %d query_sleeptime: %d lookahead_days: %d login_retry_sleeptime: %d strftime_string: %s" % ( secrets_file, alarm_sleeptime, query_sleeptime, lookahead_days, login_retry_sleeptime, strftime_string ))
     
     update_events_thread()
 
