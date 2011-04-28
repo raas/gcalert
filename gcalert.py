@@ -30,12 +30,12 @@
 #
 # TODO:
 # - warn for unsecure permissions of the password/secret file
-# - option for strftime in alarms
 # - use some sort of proper logging with log levels etc
 # - options for selecting which calendars to alert (currently: all of them)
 # - snooze buttons; this requires a gtk.main() thread and that's not trivial
 # - testing (as in, unit testing), after having a main()
 # - multi-language support
+# - GUI and status bar icon
 
 import getopt
 import sys
@@ -136,7 +136,7 @@ class GcEvent(object):
 
     def alarm(self):
         """Show the alarm box for one event/recurrence"""
-        message( " ***** ALARM ALARM ALARM: %s (%s) %s ****  " % ( self.title, self.where, self.starttime_str )  )
+        message( " ***** ALARM ALARM ALARM: %s ****  " % self  )
         if self.where:
             a=pynotify.Notification( self.title, "<b>Starting:</b> %s\n<b>Where:</b> %s" % (self.starttime_str, self.where), 'gtk-dialog-info')
         else:
@@ -152,6 +152,7 @@ class GcEvent(object):
     def __repr__(self):
         return "GcEvent(%s, %s, %s, %s, %s)" % ( self.title, self.where, self.starttime_str, self.endtime_str, self.minutes )
 
+    # for the 'event in list_of_events' kind of checks (two instances with the same data are indeed considered equal)
     def __eq__(self, other):
         return self.__repr__() == other.__repr__()
 
@@ -168,7 +169,7 @@ def message(s):
 def debug(s):
     """Print debug message 's' if the debug_flag is set (running with -d option)"""
     if (debug_flag):
-        message("DEBUG: %s" % s)
+        message("DEBUG: %s: %s" % (sys._getframe(1).f_code.co_name, s) )
 
 # ----------------------------
 
@@ -181,71 +182,63 @@ def stopthismadness(signl, frme):
     sys.exit(0)
 
 # ----------------------------
-#
-def get_user_calendars(calendarservice):
-    """
-    Get the list of 'magic strings' used to identify each calendar
-    calendarservice: Calendar Service as returned by get_calendar_service()
-    returns: list(username) that each can be used in CalendarEventQuery()
-    """
-    try:
-        feed = calendarservice.GetAllCalendarsFeed()
-    # in there is the full feed URL and we need the last part (=='username')
-    except Exception as error: # FIXME clearer
-        debug( "Google connection lost: %s" % error )
-        try:
-            message( "Google connection lost (%d %s), will re-connect" % (error['status'], error['reason']) )
-        except Exception:
-            message( "Google connection lost with unknown error, will re-connect: %s " % error )
-        return None
-    return map(lambda x: urllib.unquote(x.id.text.split('/')[-1]), feed.entry) 
 
-# ----------------------------
-def date_range_query(cs, start_date='2007-01-01', end_date='2007-07-01'):
+def date_range_query(calendarservice, start_date='2007-01-01', end_date='2007-07-01'):
     """
     Get a list of events happening between the given dates in all calendars the user has
-    cs: Calendar Service as returned by get_calendar_service()
+    calendarservice: Calendar Service as returned by get_calendar_service()
     returns: (success, list of events)
     
     Each reminder occurence creates a new event (new GcEvent object)
     """
-    
-    el = [] # event occurence list
-    for username in get_user_calendars(cs):
-        try:
+    google_events=[] # events in all the Google Calendars
+    event_list=[] # our parsed event list
+    try:
+        feed = calendarservice.GetAllCalendarsFeed()
+        # Get the list of 'magic strings' used to identify each calendar
+        # in there is the full feed URL and we need the last part (=='username')
+        username_list = map(lambda x: urllib.unquote(x.id.text.split('/')[-1]), feed.entry) 
+        for username in username_list:
             query = gdata.calendar.service.CalendarEventQuery(username, 'private', 'full')
             query.start_min = start_date
             query.start_max = end_date 
-            feed = cs.CalendarQuery(query)
-        except Exception as error: # FIXME clearer
-            debug( "Google connection lost: %s" % error )
-            try:
-                message( "Google connection lost (%d %s), will re-connect" % (error['status'], error['reason']) )
-            except Exception:
-                message( "Google connection lost with unknown error, will re-connect: %s " % error )
-            return (False,el) # el is empty here
+            debug("processing username: %s" % username)
+            google_events += calendarservice.CalendarQuery(query).entry
+            debug("events so far: %d" % len(google_events))
+    except Exception as error: # FIXME clearer
+        debug( "Google connection lost: %s" % error )
+        try:
+            message( "Google connection lost (%d %s), will re-connect" % (error.args[0]['status'], error.args[0]['reason']) )
+        except Exception:
+            message( "Google connection lost with unknown error, will re-connect: %s " % error )
+            message( "Please report this as a bug." )
+        return (False, [])
 
-        for an_event in feed.entry:
-            where_string=''
-            try:
-                # join all 'where' entries together; you probably only have one anyway
-                where_string=' // '.join(map(lambda w: w.value_string, an_event.where))
-            except TypeError:
-                # not all events have 'where' fields (value_string fields), and that's okay
-                pass
-            for a_when in an_event.when:
-                for a_rem in a_when.reminder:
-                    debug("event TEXT: %s METHOD: %s" % (an_event.title.text, a_rem.method) )
-                    if a_rem.method == 'alert': # 'popup' in the web interface
-                        # event (one for each alarm instance) is done,
-                        # add it to the list
-                        el.append(GcEvent(
-                                    an_event.title.text,
-                                    where_string,
-                                    a_when.start_time,
-                                    a_when.end_time,
-                                    a_rem.minutes))
-    return (True,el)
+    for an_event in google_events:
+        where_string=''
+        try:
+            # join all 'where' entries together; you probably only have one anyway
+            where_string=' // '.join(map(lambda w: w.value_string, an_event.where))
+        except TypeError:
+            # not all events have 'where' fields (value_string fields), and that's okay
+            pass
+
+        # make a GcEvent out of each (event x reminder x occurence)
+        for a_when in an_event.when:
+            for a_rem in a_when.reminder:
+                debug("google event TEXT: %s METHOD: %s" % (an_event.title.text, a_rem.method) )
+                if a_rem.method == 'alert': # 'popup' in the web interface
+                    # event (one for each alarm instance) is done,
+                    # add it to the list
+                    this_event=GcEvent(
+                                an_event.title.text,
+                                where_string,
+                                a_when.start_time,
+                                a_when.end_time,
+                                a_rem.minutes)
+                    debug("new GcEvent occurence: %s" % this_event)
+                    event_list.append(this_event)
+    return (True, event_list)
 
 # ----------------------------
 def do_login(calendarservice):
@@ -277,11 +270,11 @@ def process_events_thread():
     time.sleep(threads_offset) # give a chance for the other thread to get some events
     while 1:
         nowunixtime = time.time()
-        debug("p_e_t: running")
+        debug("running")
         events_lock.acquire()
         for e in events:
             if e.starttime_unix < nowunixtime:
-                debug("p_e_t: removing %s, is gone" % e)
+                debug("removing %s, is gone" % e)
                 events.remove(e)
                 # also free up some memory
                 if e in alarmed_events:
@@ -296,11 +289,11 @@ def process_events_thread():
                     e.alarm()
                     alarmed_events.append(e)
                 else:
-                    debug("p_e_t: not yet: \"%s\" (%s) [now:%d, alarm:%d]" % ( e.title, e.starttime_str, nowunixtime, e.alarm_time_unix ))
+                    debug("not yet: \"%s\" (%s) [now:%d, alarm:%d]" % ( e.title, e.starttime_str, nowunixtime, e.alarm_time_unix ))
             else:
-                debug("p_e_t: already alarmed: \"%s\" (%s) [now:%d, alarm:%d]" % ( e.title, e.starttime_str, nowunixtime, e.alarm_time_unix ))
+                debug("already alarmed: \"%s\" (%s) [now:%d, alarm:%d]" % ( e.title, e.starttime_str, nowunixtime, e.alarm_time_unix ))
         events_lock.release()
-        debug("p_e_t: finished")
+        debug("finished")
         # we can't just sleep until the next event as the other thread MIGHT
         # add something new meanwhile
         time.sleep(alarm_sleeptime)
@@ -366,32 +359,33 @@ def update_events_thread():
             time.sleep(login_retry_sleeptime)
             connectionstatus = do_login(cs)
         else:
-            debug("u_e_t: running")
+            debug("running")
             # today
             range_start = time.strftime("%Y-%m-%d",time.localtime())
             # tommorrow, or later
             range_end=time.strftime("%Y-%m-%d",time.localtime(time.time()+lookahead_days*24*3600))
             (connectionstatus,newevents) = date_range_query(cs, range_start, range_end)
-            events_lock.acquire()
-            now = time.time()
-            # remove stale events
-            for n in events:
-                if not (n in newevents):
-                    debug('Event deleted or modified: %s' % n)
-                    events.remove(n)
-            # add new events to the list
-            for n in newevents:
-                debug('Is new event N really new? THIS: %s' % n)
-                if not (n in events):
-                    debug('Received event: %s' % n)
-                    # does it start in the future?
-                    if now < n.starttime_unix:
-                        debug("-> future, adding")
-                        events.append(n)
-                    else:
-                        debug("-> past already")
-            events_lock.release()
-            debug("u_e_t: finished")
+            if connectionstatus: # if we're still logged in, the query was successful and newevents is valid
+                events_lock.acquire()
+                now = time.time()
+                # remove stale events, if the new event list is valid
+                for n in events:
+                    if not (n in newevents):
+                        debug('Event deleted or modified: %s' % n)
+                        events.remove(n)
+                # add new events to the list
+                for n in newevents:
+                    debug('Is new event N really new? THIS: %s' % n)
+                    if not (n in events):
+                        debug('Not seen before: %s' % n)
+                        # does it start in the future?
+                        if now < n.starttime_unix:
+                            debug("-> future, adding")
+                            events.append(n)
+                        else:
+                            debug("-> past already")
+                events_lock.release()
+            debug("finished")
             time.sleep(query_sleeptime)
 
 if __name__ == '__main__':
