@@ -74,9 +74,11 @@ alarm_sleeptime = 30 # seconds between waking up to check alarm list
 query_sleeptime = 180 # seconds between querying Google 
 lookahead_days = 3 # look this many days in the future
 debug_flag = False
+quiet_flag = False
 login_retry_sleeptime = 300 # seconds between reconnects in case of errors
 threads_offset = 5 # this many seconds offset between the two threads' runs
 strftime_string = '%Y-%m-%d  %H:%M' # in the event display
+icon = 'gtk-dialog-info' # icon to use in notifications
 
 # -------------------------------------------------------------------------------------------
 # end of user-changeable stuff here
@@ -107,10 +109,18 @@ class GcEvent(object):
         # (for events that last more than a day and have no time set, apparently)
         # python can't compare two dates if only one has TZ info
         # this might screw us at, say, if DST changes between when we get the event and its alarm
-        if not self.start.tzname():
+        try:
+            if not self.start.tzname():
+                self.start=self.start.replace(tzinfo=dateutil.tz.tzlocal())
+        except AttributeError:
             self.start=self.start.replace(tzinfo=dateutil.tz.tzlocal())
-        if not self.end.tzname():
+            
+        try:
+            if not self.end.tzname():
+                self.end=self.end.replace(tzinfo=dateutil.tz.tzlocal())
+        except AttributeError:
             self.end=self.end.replace(tzinfo=dateutil.tz.tzlocal())
+            
         self.minutes=minutes
 
     def get_starttime_str(self):
@@ -138,9 +148,9 @@ class GcEvent(object):
         """Show the alarm box for one event/recurrence"""
         message( " ***** ALARM ALARM ALARM: %s ****  " % self  )
         if self.where:
-            a=pynotify.Notification( self.title, "<b>Starting:</b> %s\n<b>Where:</b> %s" % (self.starttime_str, self.where), 'gtk-dialog-info')
+            a=pynotify.Notification( self.title, "<b>Starting:</b> %s\n<b>Where:</b> %s" % (self.starttime_str, self.where), icon)
         else:
-            a=pynotify.Notification( self.title, "<b>Starting:</b> %s" % self.starttime_str, 'gtk-dialog-info')
+            a=pynotify.Notification( self.title, "<b>Starting:</b> %s" % self.starttime_str, icon)
         # let the alarm stay until it's closed by hand (acknowledged)
         a.set_timeout(pynotify.EXPIRES_NEVER)
         if not a.show():
@@ -161,8 +171,9 @@ class GcEvent(object):
 
 def message(s):
     """Print one message 's' and flush the buffer; useful when redirected to a file"""
-    print "%s gcalert.py: %s" % ( time.asctime(), s)
-    sys.stdout.flush()
+    if not quiet_flag:
+        print "%s gcalert.py: %s" % ( time.asctime(), s)
+        sys.stdout.flush()
 
 # ----------------------------
 
@@ -307,6 +318,7 @@ def usage():
     print "                        username and password, newline-separated"
     print "                        Default: $HOME/.gcalert_secret"
     print " -d, --debug          : produce debug messages"
+    print " -u, --quiet          : disables all non-debug messages"
     print " -q N, --query=N      : poll Google every N seconds for newly"
     print "                        added events (default: %d)" % query_sleeptime
     print " -a M, --alarm=M      : awake and produce alarms every N "
@@ -317,6 +329,8 @@ def usage():
     print "                        attempts (default: %d)" % login_retry_sleeptime
     print " -t F, --timeformat=F : set strftime(3) string for displaying"
     print "                        event start times (default: '%s')" % strftime_string
+    print " -i I, --icon=I       : set the icon to display in "
+    print "                        notifications (default: '%s')" % icon
 
 def get_calendar_service():
     """
@@ -395,7 +409,7 @@ if __name__ == '__main__':
     #
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hds:q:a:l:r:t:", ["help", "debug", "secret=", "query=", "alarm=", "look=", "retry=", "timeformat="])
+        opts, args = getopt.getopt(sys.argv[1:], "hdus:q:a:l:r:t:i:", ["help", "debug", "quiet", "secret=", "query=", "alarm=", "look=", "retry=", "timeformat=", "icon="])
     except getopt.GetoptError as err:
         # print help information and exit:
         print str(err) # will print something like "option -a not recognized"
@@ -408,6 +422,8 @@ if __name__ == '__main__':
             elif o in ("-h", "--help"):
                 usage()
                 sys.exit()
+            elif o in ("-u", "--quiet"):
+                quiet_flag = True
             elif o in ("-s", "--secret"):
                 secrets_file = a
                 debug("secrets_file set to %s" % secrets_file)
@@ -426,6 +442,9 @@ if __name__ == '__main__':
             elif o in ("-t", "--timeformat"):
                 strftime_string = a
                 debug("strftime_string set to %s" % strftime_string)
+            elif o in ("-i", "--icon"):
+                icon = a
+                debug("icon set to %s" % icon)
             else:
                 assert False, "unhandled option"
     except ValueError:
