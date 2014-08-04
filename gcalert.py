@@ -109,6 +109,9 @@ class GcEvent(object):
         # (for events that last more than a day and have no time set, apparently)
         # python can't compare two dates if only one has TZ info
         # this might screw us at, say, if DST changes between when we get the event and its alarm
+        #
+        # workaround: tzname() can raise AttributeError if the timezone is None
+        # and it calls its .encode() method to return the value
         try:
             if not self.start.tzname():
                 self.start=self.start.replace(tzinfo=dateutil.tz.tzlocal())
